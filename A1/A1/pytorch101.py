@@ -727,11 +727,10 @@ def challenge_get_uniques(x: torch.Tensor) -> Tuple[Tensor, Tensor]:
     ##########################################################################
     # Replace "pass" statement with your code
     
-    # first get the sorted indices
-    sort_idx = torch.argsort(x)
+    # first get the sorted indices, NOTE: use stable torch.argsort(), so relative   
+    # position of first occuring duplicate element will be maintained 
+    sort_idx = torch.argsort(x, stable=True)
     # sort the input tensor 
-    # NOTE: torch.argsort() is a stable sorting algorithm, so relative position  
-    # of first occuring duplicate element will be maintained 
     x_sorted = x[sort_idx]
     # get diff between consecutive elements 
     x_shifted = torch.cat([torch.tensor([0]), x_sorted])
