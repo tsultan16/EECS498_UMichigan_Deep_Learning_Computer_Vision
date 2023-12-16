@@ -169,7 +169,9 @@ def svm_loss_naive(
                 # at the same time that the loss is being computed.                   #
                 #######################################################################
                 # Replace "pass" statement with your code
-                pass
+                dW[:,j] = dW[:,j] + X[i] 
+                dW[:,y[i]] = dW[:,y[i]] - X[i]
+
                 #######################################################################
                 #                       END OF YOUR CODE                              #
                 #######################################################################
@@ -187,7 +189,7 @@ def svm_loss_naive(
     # and add it to dW. (part 2)                                                #
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    dW  = dW / num_train +   2 * reg * W  
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
@@ -223,7 +225,27 @@ def svm_loss_vectorized(
     # result in loss.                                                           #
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    N, D = X.shape
+
+    # first compute the scores for entire batch
+    s = X.mm(W) # shape = (N,C)
+
+    # compute margins for entire batch
+    margin = s - s[torch.arange(N), y].view(N,1) + 1
+    margin.clamp_(min=0) # use clamp for in-place thresholding (more memory efficient than margin[margin<0] = 0)
+
+    # to compute the loss for each instance, we want to sum up the margins of all
+    # the wrong classes, i.e. exclude the column corresponding the target label y
+    # can do this by zeroing out that column for each row and then summing the entire row
+    margin[torch.arange(N), y]  = 0 # zeroing out the column for target label     
+    #loss = margin.sum(dim=1) # sum along rows
+
+    #print(loss.shape)
+
+    # now take the average over all instances and add regularization term
+    loss = margin.sum()/N + reg * torch.sum(W * W)
+
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
