@@ -599,7 +599,7 @@ def softmax_loss_vectorized(
     # Replace "pass" statement with your code
     
     N, D = X.shape
-    _, C = W.shape
+    D, C = W.shape
 
     # compute softmax probabilities (for numerical stability, we will shift values of s in every row
     # so that the the largest value in each row is zero, this will prevent the exponentials from
@@ -607,11 +607,11 @@ def softmax_loss_vectorized(
     s = X.mm(W) # shape = (N,C)
     smax, _ = s.max(dim=1, keepdims=True) 
     s = torch.exp(s-smax) 
-    s = s / s.sum(dim=1, keepdims=True)
+    s.div_(s.sum(dim=1, keepdims=True))
 
     # compute average loss
     loss = -torch.log(s[torch.arange(N),y])
-    loss = loss.mean()    
+    loss = loss.mean() + reg * torch.sum(W * W)  
 
     # compute gradient
     s[torch.arange(N),y] -= 1 
@@ -647,7 +647,10 @@ def softmax_get_search_params():
     # classifier.                                                             #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    learning_rates = [1, 5e-1, 1e-1]
+    regularization_strengths = [0.01, 0.05]
+
     ###########################################################################
     #                           END OF YOUR CODE                              #
     ###########################################################################
