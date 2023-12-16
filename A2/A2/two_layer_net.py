@@ -147,7 +147,12 @@ def nn_forward_pass(params: Dict[str, torch.Tensor], X: torch.Tensor):
     # shape (N, C).                                                            #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    hidden = X.mm(W1) + b1.view(1,-1) # shape = (N,H)
+    hidden = torch.clamp(hidden, min=0)
+
+    scores = hidden.mm(W2) + b2.view(1,-1) # shape = (N,C)
+
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -212,7 +217,16 @@ def nn_forward_backward(
     # (Check Numeric Stability in http://cs231n.github.io/linear-classify/).   #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    s = scores # shape = (N,C)
+    smax, _ = s.max(dim=1, keepdims=True) 
+    s = torch.exp(s-smax) 
+    s.div_(s.sum(dim=1, keepdims=True))
+
+    # compute average loss
+    loss = -torch.log(s[torch.arange(N),y])
+    loss = loss.mean() + reg * (torch.sum(W1 * W1) + torch.sum(W2 * W2))  
+
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -226,7 +240,22 @@ def nn_forward_backward(
     # tensor of same size                                                     #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    # backpropagation
+    s[torch.arange(N),y] -= 1 
+    dL_ds = s / N # shape = (N,C)
+    dL_db2 = dL_ds.sum(dim=0) # shape = (C,)
+    dL_dW2 = h1.t().mm(dL_ds) # shape = (H,C)
+    grads['b2'] = dL_db2
+    grads['W2'] = dL_dW2 + 2*reg*W2  
+
+    dL_dh = dL_ds.mm(W2.t()) # shape = (N,H)
+    dL_dz = (h1>0) * dL_dh # shape = (N,H)
+    dL_db1 = dL_dz.sum(dim=0) # shape = (H,)
+    dL_dW1 = X.t().mm(dL_dz) # shape = (D,H)
+    grads['b1'] = dL_db1
+    grads['W1'] = dL_dW1 + 2*reg*W1  
+
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
