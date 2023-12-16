@@ -227,6 +227,7 @@ def svm_loss_vectorized(
     # Replace "pass" statement with your code
     
     N, D = X.shape
+    _, C = W.shape
 
     # first compute the scores for entire batch
     s = X.mm(W) # shape = (N,C)
@@ -260,7 +261,25 @@ def svm_loss_vectorized(
     # loss.                                                                     #
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    # to jth column of W, we add all Xi's which have nonzero margin_i,j
+    # which we can vectorize by multiplying X transpose with the matrix of 
+    # non zero margin indicators (i.e. 1's wherever non zero margin, zero elsewhere)
+    margin[margin>0] = 1 # shape = (N,C)
+
+    # the jth column of dW will now have the sum of all X_i with nonzero margin value
+    dW = X.t().mm(margin) # shape = (D,C)
+
+    # now we scaled each row of X by the non zero margin count
+    m = margin.sum(dim=1, keepdims=True).to(torch.int64)
+    X_m = -X * m 
+
+    # now we add each scaled Xi to the yi'th column in dW
+    dW = dW.index_add_(1, y, X_m.t())
+
+    # add regularization term
+    dW  = dW/N + 2*reg*W  
+
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
