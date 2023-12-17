@@ -150,7 +150,6 @@ def nn_forward_pass(params: Dict[str, torch.Tensor], X: torch.Tensor):
     
     hidden = X.mm(W1) + b1.view(1,-1) # shape = (N,H)
     hidden = torch.clamp(hidden, min=0)
-
     scores = hidden.mm(W2) + b2.view(1,-1) # shape = (N,C)
 
     ###########################################################################
@@ -247,14 +246,14 @@ def nn_forward_backward(
     dL_db2 = dL_ds.sum(dim=0) # shape = (C,)
     dL_dW2 = h1.t().mm(dL_ds) # shape = (H,C)
     grads['b2'] = dL_db2
-    grads['W2'] = dL_dW2 + 2*reg*W2  
+    grads['W2'] = dL_dW2 + 2*reg*W2  # add regularization term gradient
 
     dL_dh = dL_ds.mm(W2.t()) # shape = (N,H)
     dL_dz = (h1>0) * dL_dh # shape = (N,H)
     dL_db1 = dL_dz.sum(dim=0) # shape = (H,)
     dL_dW1 = X.t().mm(dL_dz) # shape = (D,H)
     grads['b1'] = dL_db1
-    grads['W1'] = dL_dW1 + 2*reg*W1  
+    grads['W1'] = dL_dW1 + 2*reg*W1  # add regularization term gradient
 
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -336,7 +335,10 @@ def nn_train(
         # stored in the grads dictionary defined above.                         #
         #########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        for p in params.keys():
+            params[p] -= learning_rate *  grads[p]
+
         #########################################################################
         #                             END OF YOUR CODE                          #
         #########################################################################
@@ -394,7 +396,22 @@ def nn_predict(
     # TODO: Implement this function; it should be VERY simple!                #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    W1, b1 = params["W1"], params["b1"]
+    W2, b2 = params["W2"], params["b2"]
+    N, D = X.shape
+    
+    # compute softmax probabilities
+    hidden = X.mm(W1) + b1.view(1,-1) # shape = (N,H)
+    hidden = torch.clamp(hidden, min=0)
+    s = hidden.mm(W2) + b2.view(1,-1) # shape = (N,C)
+    smax, _ = s.max(dim=1, keepdims=True) 
+    s = torch.exp(s-smax) 
+    s.div_(s.sum(dim=1, keepdims=True))
+
+    # compute predictions
+    y_pred = torch.argmax(s, dim=1)
+ 
     ###########################################################################
     #                              END OF YOUR CODE                           #
     ###########################################################################
@@ -428,7 +445,10 @@ def nn_get_search_params():
     # classifier.                                                             #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    learning_rates = [1]
+    hidden_sizes = [512]
+    regularization_strengths = [0.001]
+    learning_rate_decays = [0.95]
     ###########################################################################
     #                           END OF YOUR CODE                              #
     ###########################################################################
@@ -489,7 +509,32 @@ def find_best_net(
     # automatically like we did on the previous exercises.                      #
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+
+    learning_rates , hidden_sizes, regularization_strengths, learning_rate_decays = get_param_set_fn()
+
+    for lr in learning_rates:
+        for reg in regularization_strengths:
+            for hs in hidden_sizes:    
+                net = TwoLayerNet(3*32*32, hs, 10, device=data_dict['X_train'].device, dtype=data_dict['X_train'].dtype)
+                stats = net.train(data_dict['X_train'], data_dict['y_train'], data_dict['X_val'], data_dict['y_val'],
+                            num_iters=4000, batch_size=500,
+                            learning_rate=lr, learning_rate_decay=learning_rate_decays[0],
+                            reg=reg, verbose=False)
+
+                # moving average accuracy over last 10 epochs of training
+                train_acc = stats['train_acc_history'][-10:]
+                train_acc = sum(train_acc)/len(train_acc)
+                val_acc = stats['val_acc_history'][-10:]
+                val_acc = sum(val_acc)/len(val_acc)
+
+                print(f"lr = {lr}, reg = {reg}, hs = {hs}, train accuracy = {train_acc}, val accuracy = {val_acc}")
+
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    best_stat = stats
+                    best_net = net
+                    print("New best!")
+
     #############################################################################
     #                               END OF YOUR CODE                            #
     #############################################################################
