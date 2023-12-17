@@ -39,7 +39,10 @@ class Linear(object):
         # You will need to reshape the input into rows.                      #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        N = x.shape[0]
+        out = x.view(N,-1).mm(w) + b.view(1,-1)
+
         ######################################################################
         #                        END OF YOUR CODE                            #
         ######################################################################
@@ -68,7 +71,11 @@ class Linear(object):
         # TODO: Implement the linear backward pass.      #
         ##################################################
         # Replace "pass" statement with your code
-        pass
+        N = x.shape[0]
+        db = dout.sum(dim=0)
+        dw = x.view(N,-1).t().mm(dout) 
+        dx = (dout.mm(w.t())).view(x.shape) 
+
         ##################################################
         #                END OF YOUR CODE                #
         ##################################################
@@ -95,7 +102,7 @@ class ReLU(object):
         # in-place operation.                             #
         ###################################################
         # Replace "pass" statement with your code
-        pass
+        out = torch.clamp(x, min=0)
         ###################################################
         #                 END OF YOUR CODE                #
         ###################################################
@@ -120,7 +127,9 @@ class ReLU(object):
         # in-place operation.                               #
         #####################################################
         # Replace "pass" statement with your code
-        pass
+        dx = dout.clone()
+        dx[x<0] = 0
+
         #####################################################
         #                  END OF YOUR CODE                 #
         #####################################################
@@ -202,7 +211,12 @@ class TwoLayerNet(object):
         # weights and biases using the keys 'W2' and 'b2'.                #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.params['W1'] = weight_scale * torch.randn(input_dim, hidden_dim)
+        self.params['b1'] = torch.zeros(hidden_dim)
+        self.params['W2'] = weight_scale * torch.randn(hidden_dim, num_classes)
+        self.params['b2'] = torch.zeros(num_classes)
+
         ###############################################################
         #                            END OF YOUR CODE                 #
         ###############################################################
@@ -253,7 +267,15 @@ class TwoLayerNet(object):
         # scores variable.                                          #
         #############################################################
         # Replace "pass" statement with your code
-        pass
+      
+        W1 = self.params['W1']
+        b1 = self.params['b1']
+        W2 = self.params['W2']
+        b2 = self.params['b2']
+
+        h, l1_cache = Linear_ReLU.forward(X, W1, b1)
+        scores, l2_cache = Linear.forward(h, W2, b2)
+
         ##############################################################
         #                     END OF YOUR CODE                       #
         ##############################################################
@@ -275,7 +297,20 @@ class TwoLayerNet(object):
         # regularization does not include a factor of 0.5.                #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # compute loss
+        loss, ds = softmax_loss(scores, y)
+        loss += self.reg * torch.sum(W1 * W1) +  self.reg * torch.sum(W2 * W2)
+        # backprop through final linear layer
+        dh, dw2, db2 = Linear.backward(ds, l2_cache)
+        # backprop though linear-ReLU layer
+        dX, dw1, db1 = Linear_ReLU.backward(dh, l1_cache)
+
+        grads['W1'] = dw1 + 2 * self.reg * W1
+        grads['b1'] = db1
+        grads['W2'] = dw2 + 2 * self.reg * W2
+        grads['b2'] = db2
+
         ###################################################################
         #                     END OF YOUR CODE                            #
         ###################################################################
