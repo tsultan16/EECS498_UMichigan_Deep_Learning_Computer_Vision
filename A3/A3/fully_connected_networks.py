@@ -212,10 +212,10 @@ class TwoLayerNet(object):
         ###################################################################
         # Replace "pass" statement with your code
         
-        self.params['W1'] = weight_scale * torch.randn(input_dim, hidden_dim)
-        self.params['b1'] = torch.zeros(hidden_dim)
-        self.params['W2'] = weight_scale * torch.randn(hidden_dim, num_classes)
-        self.params['b2'] = torch.zeros(num_classes)
+        self.params['W1'] = weight_scale * torch.randn(input_dim, hidden_dim, dtype=dtype, device=device)
+        self.params['b1'] = torch.zeros(hidden_dim, dtype=dtype, device=device)
+        self.params['W2'] = weight_scale * torch.randn(hidden_dim, num_classes, dtype=dtype, device=device)
+        self.params['b2'] = torch.zeros(num_classes, dtype=dtype, device=device)
 
         ###############################################################
         #                            END OF YOUR CODE                 #
@@ -372,7 +372,17 @@ class FullyConnectedNet(object):
         # should be initialized to zero.                                      #
         #######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        dims = [input_dim] + hidden_dims
+        # parameter initialization for hidden layers                
+        for i in range(len(hidden_dims)):
+          self.params[f'W{i+1}'] = weight_scale * torch.randn(dims[i], dims[i+1], dtype=dtype, device=device)
+          self.params[f'b{i+1}'] = torch.zeros(dims[i+1], dtype=dtype, device=device)
+
+        # parameter initialization for output layer
+        self.params[f'W{self.num_layers}'] = weight_scale * torch.randn(hidden_dims[-1], num_classes, dtype=dtype, device=device)
+        self.params[f'b{self.num_layers}'] = torch.zeros(num_classes, dtype=dtype, device=device)
+
         #######################################################################
         #                         END OF YOUR CODE                            #
         #######################################################################
@@ -436,7 +446,21 @@ class FullyConnectedNet(object):
         # to each dropout forward pass.                                  #
         ##################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        caches = []
+
+        for i in range(1,self.num_layers):
+          W = self.params[f'W{i}']
+          b = self.params[f'b{i}']
+          h, cache = Linear_ReLU.forward(X, W, b)
+          caches.append(cache)
+          X = h
+
+        W = self.params[f'W{self.num_layers}']
+        b = self.params[f'b{self.num_layers}']
+        scores, cache = Linear.forward(h, W, b)
+        caches.append(cache)
+
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -458,7 +482,26 @@ class FullyConnectedNet(object):
         # the gradient.                                                     #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # compute loss
+        loss, ds = softmax_loss(scores, y)
+        # add regularization
+        for i in range(1,self.num_layers+1):
+          W = self.params[f'W{i}']
+          loss += self.reg * torch.sum(W * W) 
+        
+        # backprop through final linear layer
+        dh, dwL, dbL = Linear.backward(ds, caches[-1])
+        grads[f'W{self.num_layers}'] = dwL + 2 * self.reg * self.params[f'W{self.num_layers}']
+        grads[f'b{self.num_layers}'] = dbL
+
+        # backprop though linear-ReLU hidden layers
+        for i in range(self.num_layers-1,0,-1):
+          dX, dw, db = Linear_ReLU.backward(dh, caches[i-1])
+          grads[f'W{i}'] = dw + 2 * self.reg * self.params[f'W{i}']
+          grads[f'b{i}'] = db
+          dh = dX
+
         ###########################################################
         #                   END OF YOUR CODE                      #
         ###########################################################
@@ -474,7 +517,9 @@ def create_solver_instance(data_dict, dtype, device):
     #############################################################
     solver = None
     # Replace "pass" statement with your code
-    pass
+    optim_config = {'learning_rate' : 0.5}
+    solver = Solver(model, data_dict, device=device, optim_config=optim_config, lr_decay=0.95, num_epochs=70, batch_size=500)
+
     ##############################################################
     #                    END OF YOUR CODE                        #
     ##############################################################
