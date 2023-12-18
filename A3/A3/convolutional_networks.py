@@ -51,11 +51,33 @@ class Conv(object):
         # You are NOT allowed to use anything in torch.nn in other places. #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+        N, C, H, W = x.shape
+        F, _, HH, WW = w.shape
+        p = conv_param['pad']
+        s = conv_param['stride']
+
+        Hprime = 1 + int((H+2*p-HH)/s)
+        Wprime = 1 + int((W+2*p-WW)/s)
+
+        out = torch.zeros(size=(N,F,Hprime,Wprime), dtype=x.dtype, device=x.device)
+
+        # apply padding
+        xp = torch.nn.functional.pad(x, (p,p,p,p))
+       
+        for n in range(N):
+          for f in range(F):
+            for i in range(Hprime):
+              for j in range(Wprime):   
+                ilo = i*s
+                ihi = ilo + HH 
+                jlo = j*s
+                jhi = jlo + WW
+                out[n,f,i,j] = torch.sum(xp[n,:,ilo:ihi,jlo:jhi] * w[f,:,:,:]) + b[f]           
+              
         #####################################################################
         #                          END OF YOUR CODE                         #
         #####################################################################
-        cache = (x, w, b, conv_param)
+        cache = (xp, w, b, conv_param)
         return out, cache
 
     @staticmethod
@@ -76,7 +98,68 @@ class Conv(object):
         # TODO: Implement the convolutional backward pass.            #
         ###############################################################
         # Replace "pass" statement with your code
-        pass
+        
+        xp, w, b, conv_param = cache
+        p = conv_param['pad']
+        s = conv_param['stride']
+
+        N, F, Hprime, Wprime = dout.shape
+        _, C, Hpadded, Wpadded = xp.shape
+        _, _, HH, WW = w.shape
+
+        # create padded upsampled version of downstream gradient (will need this for input gradient)
+        if Hpadded%2==0:
+          dout_up = torch.zeros(size=(Hprime*s, Wprime*s), device=xp.device)
+        else:
+          if s > 1 :
+            dout_up = torch.zeros(size=(Hprime*s-1, Wprime*s-1), device=xp.device)    
+          else:
+            dout_up = torch.zeros(size=(Hprime, Wprime), device=xp.device)  
+
+        dx = torch.zeros_like(xp, device=xp.device)
+        dw = torch.zeros_like(w, device=xp.device)
+        db = torch.zeros_like(b, device=xp.device)
+
+        for n in range(N):
+          for f in range(F):
+
+            # first lets compute the upstream gradient for each filter channel
+            # by convolving corresponding input channel with the upsampled downstream gradient 
+            dout_up[::s,::s] = dout[n,f,:,:]
+            for c in range(C):  
+              xx = xp[n,c,:,:]
+              for i in range(HH):
+                for j in range(WW):   
+                  ilo = i
+                  ihi = ilo + dout_up.shape[0] 
+                  jlo = j
+                  jhi = jlo + dout_up.shape[1]
+                  dw[f,c,i,j] += torch.sum(xx[ilo:ihi,jlo:jhi] * dout_up)            
+
+            # now let's compute the upstream gradient for the input
+            # first we pad the upsampled downstream gradient
+            dout_up_pad = torch.nn.functional.pad(dout_up, (HH-1,HH-1,WW-1,WW-1))
+            # iterate over filter channels
+            for c in range(C):  
+              # next we flip the filter
+              w_flipped = torch.flip(w[f,c,:,:], [0,1])             
+              # now we convolve the padded upsampled dout with this flipped filter
+              # to get the gradient for the corresponding input channel
+              for i in range(Hpadded):
+                for j in range(Wpadded):
+                  ilo = i
+                  ihi = ilo + HH
+                  jlo = j
+                  jhi = jlo + WW
+                  dx[n,c,i,j] += torch.sum(dout_up_pad[ilo:ihi,jlo:jhi] * w_flipped)
+
+        # now compute the upstream gradient for the bias, which is just the downstream gradient
+        # summed over the first, third and fourth dimensions
+        db = dout.sum(dim=[0,2,3])        
+
+        # finally trim off the padding from dx
+        dx = dx[:,:,p:-p,p:-p]    
+  
         ###############################################################
         #                       END OF YOUR CODE                      #
         ###############################################################
@@ -109,7 +192,26 @@ class MaxPool(object):
         # TODO: Implement the max-pooling forward pass                     #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        N, C, H, W = x.shape
+        pool_height = pool_param['pool_height']
+        pool_width = pool_param['pool_width']
+        s = pool_param['stride']
+
+        Hprime = 1 + int((H-pool_height)/s)
+        Wprime = 1 + int((W-pool_width)/s)
+        out = torch.zeros(size=(N,C,Hprime,Wprime), dtype=x.dtype, device=x.device)
+       
+        for n in range(N):
+          for c in range(C):
+            for i in range(Hprime):
+              for j in range(Wprime):   
+                ilo = i*s
+                ihi = ilo + pool_height 
+                jlo = j*s
+                jhi = jlo + pool_width
+                out[n,c,i,j] = torch.max(x[n,c,ilo:ihi,jlo:jhi])                
+
         ####################################################################
         #                         END OF YOUR CODE                         #
         ####################################################################
@@ -131,7 +233,29 @@ class MaxPool(object):
         # TODO: Implement the max-pooling backward pass                     #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        x, pool_param = cache
+        N, C, H, W = x.shape
+        pool_height = pool_param['pool_height']
+        pool_width = pool_param['pool_width']
+        s = pool_param['stride']
+
+        Hprime = 1 + int((H-pool_height)/s)
+        Wprime = 1 + int((W-pool_width)/s)
+        dx = torch.zeros_like(x, device=x.device)
+       
+        for n in range(N):
+          for c in range(C):
+            for i in range(Hprime):
+              for j in range(Wprime):   
+                ilo = i*s
+                ihi = ilo + pool_height 
+                jlo = j*s
+                jhi = jlo + pool_width
+                # get the max value in this pool region 
+                max_value = torch.max(x[n,c,ilo:ihi,jlo:jhi])
+                dx[n,c,ilo:ihi,jlo:jhi] = (x[n,c,ilo:ihi,jlo:jhi]==max_value) * dout[n,c,i,j]                
+
         ####################################################################
         #                          END OF YOUR CODE                        #
         ####################################################################
