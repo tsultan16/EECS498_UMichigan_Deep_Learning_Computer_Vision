@@ -453,7 +453,11 @@ class FullyConnectedNet(object):
           W = self.params[f'W{i}']
           b = self.params[f'b{i}']
           h, cache = Linear_ReLU.forward(X, W, b)
-          caches.append(cache)
+          if self.use_dropout:
+            h, droupout_cache = Dropout.forward(h, self.dropout_param)
+            caches.append((cache, droupout_cache))
+          else:
+            caches.append(cache)        
           X = h
 
         W = self.params[f'W{self.num_layers}']
@@ -497,7 +501,12 @@ class FullyConnectedNet(object):
 
         # backprop though linear-ReLU hidden layers
         for i in range(self.num_layers-1,0,-1):
-          dX, dw, db = Linear_ReLU.backward(dh, caches[i-1])
+          if self.use_dropout:
+              cache, dropout_cache = caches[i-1]    
+              dh = Dropout.backward(dh, dropout_cache)
+          else:
+              cache = caches[i-1]    
+          dX, dw, db = Linear_ReLU.backward(dh, cache)
           grads[f'W{i}'] = dw + 2 * self.reg * self.params[f'W{i}']
           grads[f'b{i}'] = db
           dh = dX
@@ -534,7 +543,8 @@ def get_three_layer_network_params():
     weight_scale = 1e-2   # Experiment with this!
     learning_rate = 1e-4  # Experiment with this!
     # Replace "pass" statement with your code
-    pass
+    weight_scale = 0.2   # 0.1
+    learning_rate = 0.4  # 1.0
     ################################################################
     #                             END OF YOUR CODE                 #
     ################################################################
@@ -549,7 +559,10 @@ def get_five_layer_network_params():
     learning_rate = 2e-3  # Experiment with this!
     weight_scale = 1e-5   # Experiment with this!
     # Replace "pass" statement with your code
-    pass
+    
+    weight_scale = 0.1   # 0.1
+    learning_rate = 0.15  # 1.0
+
     ################################################################
     #                       END OF YOUR CODE                       #
     ################################################################
@@ -593,7 +606,13 @@ def sgd_momentum(w, dw, config=None):
     # update the velocity v.                                         #
     ##################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    mu = config['momentum']
+    lr = config['learning_rate']
+    v = mu * v - lr * dw
+    w += v 
+    next_w = w
+
     ###################################################################
     #                           END OF YOUR CODE                      #
     ###################################################################
@@ -627,7 +646,17 @@ def rmsprop(w, dw, config=None):
     # config['cache'].                                                        #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    epsilon = config['epsilon']
+    lr = config['learning_rate']
+    dr = config['decay_rate']
+    cache = config['cache']
+    cache = dr * cache + (1-dr) * (dw*dw)
+    w -=  lr * dw / (torch.sqrt(cache) + epsilon)
+    
+    next_w = w
+    config['cache'] = cache
+
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -668,7 +697,27 @@ def adam(w, dw, config=None):
     # using it in any calculations.                                          #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+  
+    lr = config['learning_rate']
+    beta1 = config['beta1']
+    beta2 = config['beta2']
+    epsilon = config['epsilon']
+    m = config['m']
+    v = config['v']
+    t = config['t']
+
+    t += 1
+    m = beta1*m + (1-beta1)*dw
+    mt = m / (1-beta1**t)
+    v = beta2*v + (1-beta2)*(dw*dw)
+    vt = v / (1-beta2**t)
+    w -= lr * mt/(torch.sqrt(vt) + epsilon)
+
+    next_w = w
+    config['m'] = m
+    config['v'] = v
+    config['t'] = t
+  
     #########################################################################
     #                              END OF YOUR CODE                         #
     #########################################################################
@@ -721,7 +770,10 @@ class Dropout(object):
             # Store the dropout mask in the mask variable.               #
             ##############################################################
             # Replace "pass" statement with your code
-            pass
+            
+            mask = (torch.rand(size=x.shape, device=x.device) > p) / (1-p)   
+            out = x * mask 
+
             ##############################################################
             #                   END OF YOUR CODE                         #
             ##############################################################
@@ -731,7 +783,10 @@ class Dropout(object):
             # inverted dropout.                                          #
             ##############################################################
             # Replace "pass" statement with your code
-            pass
+            
+            mask = None
+            out = x 
+            
             ##############################################################
             #                      END OF YOUR CODE                      #
             ##############################################################
@@ -758,7 +813,9 @@ class Dropout(object):
             # inverted dropout                                        #
             ###########################################################
             # Replace "pass" statement with your code
-            pass
+            
+            dx = dout * mask
+
             ###########################################################
             #                     END OF YOUR CODE                    #
             ###########################################################
