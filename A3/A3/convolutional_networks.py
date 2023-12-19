@@ -109,12 +109,21 @@ class Conv(object):
 
         # create padded upsampled version of downstream gradient (will need this for input gradient)
         if Hpadded%2==0:
-          dout_up = torch.zeros(size=(Hprime*s, Wprime*s), device=xp.device)
+          dout_up = torch.zeros(size=(N, F, Hprime*s, Wprime*s), device=xp.device)
         else:
           if s > 1 :
-            dout_up = torch.zeros(size=(Hprime*s-1, Wprime*s-1), device=xp.device)    
+            dout_up = torch.zeros(size=(N, F, Hprime*s-1, Wprime*s-1), device=xp.device)    
           else:
-            dout_up = torch.zeros(size=(Hprime, Wprime), device=xp.device)  
+            dout_up = torch.zeros(size=(N, F, Hprime, Wprime), device=xp.device)  
+
+        # upsampled downstream gradient
+        dout_up[:,:,::s,::s] = dout
+
+        # padded upsampled downstream gradient
+        dout_up_pad = torch.nn.functional.pad(dout_up, (WW-1,WW-1,HH-1,HH-1))
+
+        # spatially flipped filters
+        w_flipped = torch.flip(w, [2,3])
 
         dx = torch.zeros_like(xp, device=xp.device)
         dw = torch.zeros_like(w, device=xp.device)
@@ -125,25 +134,20 @@ class Conv(object):
 
             # first lets compute the upstream gradient for each filter channel
             # by convolving corresponding input channel with the upsampled downstream gradient 
-            dout_up[::s,::s] = dout[n,f,:,:]
             for c in range(C):  
-              xx = xp[n,c,:,:]
+              #xx = xp[n,c,:,:]
               for i in range(HH):
                 for j in range(WW):   
                   ilo = i
-                  ihi = ilo + dout_up.shape[0] 
+                  ihi = ilo + dout_up.shape[2] 
                   jlo = j
-                  jhi = jlo + dout_up.shape[1]
-                  dw[f,c,i,j] += torch.sum(xx[ilo:ihi,jlo:jhi] * dout_up)            
+                  jhi = jlo + dout_up.shape[3]
+                  dw[f,c,i,j] += torch.sum(xp[n,c,ilo:ihi,jlo:jhi] * dout_up[n,f,:,:])            
 
-            # now let's compute the upstream gradient for the input
-            # first we pad the upsampled downstream gradient
-            dout_up_pad = torch.nn.functional.pad(dout_up, (HH-1,HH-1,WW-1,WW-1))
+            # now let's compute the upstream gradient for each input channel
             # iterate over filter channels
             for c in range(C):  
-              # next we flip the filter
-              w_flipped = torch.flip(w[f,c,:,:], [0,1])             
-              # now we convolve the padded upsampled dout with this flipped filter
+              # now we convolve the padded upsampled dout with the flipped filter
               # to get the gradient for the corresponding input channel
               for i in range(Hpadded):
                 for j in range(Wpadded):
@@ -151,7 +155,7 @@ class Conv(object):
                   ihi = ilo + HH
                   jlo = j
                   jhi = jlo + WW
-                  dx[n,c,i,j] += torch.sum(dout_up_pad[ilo:ihi,jlo:jhi] * w_flipped)
+                  dx[n,c,i,j] += torch.sum(dout_up_pad[n,f,ilo:ihi,jlo:jhi] * w_flipped[f,c,:,:])
 
         # now compute the upstream gradient for the bias, which is just the downstream gradient
         # summed over the first, third and fourth dimensions
@@ -254,6 +258,7 @@ class MaxPool(object):
                 jhi = jlo + pool_width
                 # get the max value in this pool region 
                 max_value = torch.max(x[n,c,ilo:ihi,jlo:jhi])
+                # copy downstream gradient value into position of max
                 dx[n,c,ilo:ihi,jlo:jhi] = (x[n,c,ilo:ihi,jlo:jhi]==max_value) * dout[n,c,i,j]                
 
         ####################################################################
@@ -318,7 +323,21 @@ class ThreeLayerConvNet(object):
         # look at the start of the loss() function to see how that happens.  #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        C, H, W = input_dims
+        F = num_filters
+
+        # max pool output spatial size
+        Hprime = 1 + int((H-2)/2)
+        Wprime = 1 + int((W-2)/2)
+
+        self.params['W1'] = weight_scale * torch.randn(size=(F,C,filter_size, filter_size), dtype=dtype, device=device)
+        self.params['b1'] = torch.zeros(size=(F,), dtype=dtype, device=device)
+        self.params['W2'] = weight_scale * torch.randn(size=(F*Hprime*Wprime, hidden_dim), dtype=dtype, device=device)
+        self.params['b2'] = torch.zeros(size=(hidden_dim,), dtype=dtype, device=device)
+        self.params['W3'] = weight_scale * torch.randn(size=(hidden_dim, num_classes), dtype=dtype, device=device)
+        self.params['b3'] = torch.zeros(size=(num_classes,), dtype=dtype, device=device)
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -367,7 +386,11 @@ class ThreeLayerConvNet(object):
         # above                                                              #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        out, cache_conv = Conv_ReLU_Pool.forward(X, W1, b1, conv_param, pool_param)
+        out, cache_linear1 = Linear_ReLU.forward(out, W2, b2)
+        scores, cache_linear2 = Linear.forward(out, W3, b3)
+
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -388,7 +411,20 @@ class ThreeLayerConvNet(object):
         # does not include a factor of 0.5                                 #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+
+        loss, dx = softmax_loss(scores, y)
+        loss += self.reg * (torch.sum(W1 * W1) + torch.sum(W2 * W2) + torch.sum(W3 * W3)) 
+        dx, dW3, db3 = Linear.backward(dx, cache_linear2)
+        dx, dW2, db2 = Linear_ReLU.backward(dx, cache_linear1)
+        dx, dW1, db1 = Conv_ReLU_Pool.backward(dx, cache_conv)
+
+        grads['W1'] = dW1 + 2 * self.reg * W1
+        grads['b1'] = db1
+        grads['W2'] = dW2 + 2 * self.reg * W2
+        grads['b2'] = db2
+        grads['W3'] = dW3 + 2 * self.reg * W3
+        grads['b3'] = db3
+
         ###################################################################
         #                             END OF YOUR CODE                    #
         ###################################################################
