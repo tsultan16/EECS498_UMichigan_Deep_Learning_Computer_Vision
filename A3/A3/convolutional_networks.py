@@ -4,7 +4,7 @@ WARNING: you SHOULD NOT use ".to()" or ".cuda()" in each implementation block.
 """
 import torch
 from a3_helper import softmax_loss
-from fully_connected_networks import Linear_ReLU, Linear, Solver, adam, ReLU
+from fully_connected_networks import Linear_ReLU, Linear, Solver, adam, ReLU, sgd_momentum, rmsprop
 
 
 def hello_convolutional_networks():
@@ -513,11 +513,14 @@ class DeepConvNet(object):
         Hprime, Wprime = H, W
 
         for i, F in enumerate(num_filters):
-          self.params[f'W{i+1}'] = weight_scale * torch.randn(size=(F,C,3,3), dtype=dtype, device=device)
+          if weight_scale == 'kaiming':
+            self.params[f'W{i+1}'] = kaiming_initializer(C,F,K=3, dtype=dtype, device=device)    
+          else:  
+            self.params[f'W{i+1}'] = weight_scale * torch.randn(size=(F,C,3,3), dtype=dtype, device=device)
           self.params[f'b{i+1}'] = torch.zeros(size=(F,), dtype=dtype, device=device)    
-          if batchnorm:
-             self.params[f'gamma{i+1}'] = torch.ones(size=(F,Hprime, Wprime), dtype=dtype, device=device)
-             self.params[f'beta{i+1}'] = torch.zeros(size=(F,Hprime, Wprime), dtype=dtype, device=device)
+          #if batchnorm:
+          #   self.params[f'gamma{i+1}'] = torch.ones(size=(F,Hprime, Wprime), dtype=dtype, device=device)
+          #   self.params[f'beta{i+1}'] = torch.zeros(size=(F,Hprime, Wprime), dtype=dtype, device=device)
 
           if i in max_pools:
             # max pool output spatial size
@@ -526,7 +529,10 @@ class DeepConvNet(object):
           
           C = F  
 
-        self.params[f'W{self.num_layers}'] = weight_scale * torch.randn(size=(F*Hprime*Wprime, num_classes), dtype=dtype, device=device)
+        if weight_scale == 'kaiming':
+            self.params[f'W{self.num_layers}'] = kaiming_initializer(F*Hprime*Wprime, num_classes, relu=False, dtype=dtype, device=device)  
+        else:
+          self.params[f'W{self.num_layers}'] = weight_scale * torch.randn(size=(F*Hprime*Wprime, num_classes), dtype=dtype, device=device)
         self.params[f'b{self.num_layers}'] = torch.zeros(size=(num_classes,), dtype=dtype, device=device)
 
 
@@ -714,7 +720,8 @@ def find_overfit_parameters():
     # model achieves 100% training accuracy within 30 epochs. #
     ###########################################################
     # Replace "pass" statement with your code
-    pass
+    weight_scale = 0.1  
+    learning_rate = 0.001
     ###########################################################
     #                       END OF YOUR CODE                  #
     ###########################################################
@@ -729,7 +736,34 @@ def create_convolutional_solver_instance(data_dict, dtype, device):
     # CIFAR-10 within 60 seconds.                           #
     #########################################################
     # Replace "pass" statement with your code
-    pass
+    
+    data = {
+      'X_train': data_dict['X_train'], 
+      'y_train': data_dict['y_train'],
+      'X_val': data_dict['X_val'],
+      'y_val': data_dict['y_val'],
+    }
+        
+    input_dims = data_dict['X_train'].shape[1:]
+    model = DeepConvNet(input_dims=input_dims, num_classes=10,
+                        num_filters=([32] * 1) + ([64] * 1)+ ([128] * 1),
+                        max_pools=[0, 1],
+                        weight_scale='kaiming',
+                        reg=1e-5, # #1e-5
+                        dtype=torch.float32,
+                        device='cuda'
+                        )
+
+    solver = Solver(model, data,
+                    num_epochs=100, batch_size=64, # batch_size=64
+                    update_rule= adam,
+                    optim_config={
+                      'learning_rate': 3e-4 ,# 3e-4,
+                    },
+                    lr_decay=0.9, #0.99
+                    print_every=20, device='cuda')
+
+
     #########################################################
     #                  END OF YOUR CODE                     #
     #########################################################
@@ -771,7 +805,9 @@ def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
         # and device.                                                     #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        weight = torch.sqrt(torch.tensor([gain/Din], dtype=dtype, device=device)) * torch.randn(size=(Din, Dout), dtype=dtype, device=device)
+
         ###################################################################
         #                            END OF YOUR CODE                     #
         ###################################################################
@@ -785,7 +821,9 @@ def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
         # and device.                                                     #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        weight = torch.sqrt(torch.tensor([gain/(Din*K*K)], dtype=dtype, device=device)) * torch.randn(size=(Dout,Din,K,K), dtype=dtype, device=device)
+
         ###################################################################
         #                         END OF YOUR CODE                        #
         ###################################################################
@@ -874,7 +912,21 @@ class BatchNorm(object):
             # (https://arxiv.org/abs/1502.03167) might prove to be helpful.  #
             ##################################################################
             # Replace "pass" statement with your code
-            pass
+            
+            # mean and stdev of each activation unit over the minibatch
+            sample_mean = x.mean(dim=0, keepdims=True)
+            sample_var = eps + torch.pow((x - sample_mean),2).mean(dim=0, keepdims=True)   
+            sample_sigma = torch.sqrt(sample_var)
+            # normalize the activation units
+            xhat = (x - sample_mean) / sample_sigma
+            # apply scale and shift
+            out = gamma.view(1,-1) * xhat + beta.view(1,-1)   
+            # update running average of mean and variance
+            running_mean = momentum * running_mean + (1-momentum) * sample_mean
+            running_var = momentum * running_var + (1-momentum) * sample_var
+
+            cache = (gamma, x, sample_mean, sample_sigma)
+
             ################################################################
             #                           END OF YOUR CODE                   #
             ################################################################
@@ -887,7 +939,12 @@ class BatchNorm(object):
             # in the out variable.                                         #
             ################################################################
             # Replace "pass" statement with your code
-            pass
+            
+            # normalize the activation units
+            xhat = (x - running_mean) / torch.sqrt(running_var)
+            # apply scale and shift
+            out = gamma.view(1,-1) * xhat + beta.view(1,-1)   
+ 
             ################################################################
             #                      END OF YOUR CODE                        #
             ################################################################
@@ -929,7 +986,20 @@ class BatchNorm(object):
         # Don't forget to implement train and test mode separately.         #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        gamma, x, sample_mean, sample_sigma = cache
+        N = x.shape[0]
+        x_minus_mu = x - sample_mean
+        xhat = x_minus_mu / sample_sigma
+
+        dbeta = dout.sum(dim=0)
+        dgamma = (xhat * dout).sum(dim=0)        
+        dxhat = dout * gamma.view(1,-1)
+        x_minus_mu = x - sample_mean.view(1,-1)
+        sample_sigma = sample_sigma.view(1,-1)
+        dx = (dxhat/sample_sigma) - ((1/N) * dxhat.sum(dim=0, keepdims=True)/sample_sigma) - (1/N) * (dxhat * x_minus_mu).sum(dim=0, keepdims=True) * (x_minus_mu / torch.pow(sample_sigma, 3))
+
+
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -962,7 +1032,20 @@ class BatchNorm(object):
         # single 80-character line.                                       #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        gamma, x, sample_mean, sample_sigma = cache
+        N = x.shape[0]
+        x_minus_mu = x - sample_mean
+        xhat = x_minus_mu / sample_sigma
+
+        dbeta = dout.sum(dim=0)
+        dgamma = (xhat * dout).sum(dim=0)        
+        dxhat = dout * gamma.view(1,-1)
+        x_minus_mu = x - sample_mean.view(1,-1)
+        sample_sigma = sample_sigma.view(1,-1)
+        dx = (dxhat/sample_sigma) - ((1/N) * dxhat.sum(dim=0, keepdims=True)/sample_sigma) - (1/N) * (dxhat * x_minus_mu).sum(dim=0, keepdims=True) * (x_minus_mu / torch.pow(sample_sigma, 3))
+
+
         #################################################################
         #                        END OF YOUR CODE                       #
         #################################################################
@@ -1010,7 +1093,14 @@ class SpatialBatchNorm(object):
         # ours is less than five lines.                                #
         ################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        N, C, H, W = x.shape
+        # reshape (N,C,H,W) -> (N*H*W, C)
+        x_t = x.permute(0,2,3,1).contiguous().view(-1,C)
+        out, cache = BatchNorm.forward(x_t, gamma, beta, bn_param)
+        # reshape output back to normal
+        out = out.view(N,H,W,C).permute(0,3,1,2).contiguous()        
+
         ################################################################
         #                       END OF YOUR CODE                       #
         ################################################################
@@ -1041,7 +1131,15 @@ class SpatialBatchNorm(object):
         # ours is less than five lines.                                 #
         #################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        N, C, H, W = dout.shape
+        # reshape (N,C,H,W) -> (N*H*W, C)
+        dout_reshaped = dout.permute(0,2,3,1).contiguous().view(-1,C)
+        dx, dgamma, dbeta = BatchNorm.backward(dout_reshaped, cache)
+        # reshape output back to normal
+        dx = dx.view(N,H,W,C).permute(0,3,1,2).contiguous()  
+
+
         ##################################################################
         #                       END OF YOUR CODE                         #
         ##################################################################
