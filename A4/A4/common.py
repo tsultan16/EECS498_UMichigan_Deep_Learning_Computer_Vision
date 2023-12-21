@@ -84,7 +84,17 @@ class DetectorBackboneWithFPN(nn.Module):
         self.fpn_params = nn.ModuleDict()
 
         # Replace "pass" statement with your code
-        pass
+        c3_channels = dummy_out_shapes[0][1][1]
+        c4_channels = dummy_out_shapes[1][1][1]
+        c5_channels = dummy_out_shapes[2][1][1]
+
+        self.fpn_params['lateral_conv_c3'] = torch.nn.Conv2d(c3_channels, out_channels, kernel_size=1) 
+        self.fpn_params['lateral_conv_c4'] = torch.nn.Conv2d(c4_channels, out_channels, kernel_size=1) 
+        self.fpn_params['lateral_conv_c5'] = torch.nn.Conv2d(c5_channels, out_channels, kernel_size=1) 
+        self.fpn_params['conv_c3'] = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1) 
+        self.fpn_params['conv_c4'] = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1) 
+        self.fpn_params['conv_c5'] = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1) 
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -111,7 +121,25 @@ class DetectorBackboneWithFPN(nn.Module):
         ######################################################################
 
         # Replace "pass" statement with your code
-        pass
+        
+        c3 = backbone_feats['c3']
+        c4 = backbone_feats['c4']
+        c5 = backbone_feats['c5']
+
+        # apply 1x1 and 3x3 convs
+        c3_conv = self.fpn_params['conv_c3'](self.fpn_params['lateral_conv_c3'](c3)) # shape = (N,out_channels,H/32,W/32)
+        c4_conv = self.fpn_params['conv_c4'](self.fpn_params['lateral_conv_c4'](c4)) # shape = (N,out_channels,H/16,W/16)
+        p5 = self.fpn_params['conv_c5'](self.fpn_params['lateral_conv_c5'](c5)) # # shape = (N,out_channels,H/8,W/8)
+
+        # upsample p5 (using nearest neighbor) and add to c4_conv to get p4 
+        p4 = F.interpolate(p5, scale_factor=2, mode='nearest') + c4_conv # shape = (N,out_channels,H/16,W/16)
+        # similarly for p3
+        p3 = F.interpolate(p4, scale_factor=2, mode='nearest') + c3_conv # shape = (N,out_channels,H/8,W/8)     
+
+        fpn_feats['p3'] = p3
+        fpn_feats['p4'] = p4
+        fpn_feats['p5'] = p5
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################

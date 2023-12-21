@@ -60,7 +60,20 @@ class FCOSPredictionNetwork(nn.Module):
         stem_cls = []
         stem_box = []
         # Replace "pass" statement with your code
-        pass
+
+        schannels = [in_channels] + stem_channels
+        for i in range(1,len(schannels)):
+            stem_cls.append(nn.Conv2d(schannels[i-1], schannels[i], kernel_size=3, padding=1))
+            stem_cls.append(nn.ReLU())
+            stem_box.append(nn.Conv2d(schannels[i-1], schannels[i], kernel_size=3, padding=1))
+            stem_box.append(nn.ReLU())
+        
+        # initialize the weights
+        for i in range(0,len(stem_cls),2):
+            torch.nn.init.normal_(stem_cls[i].weight, mean=0.0, std=0.01)
+            torch.nn.init.constant_(stem_cls[i].bias, 0.0)
+            torch.nn.init.normal_(stem_box[i].weight, mean=0.0, std=0.01)
+            torch.nn.init.constant_(stem_box[i].bias, 0.0)
 
         # Wrap the layers defined by student into a `nn.Sequential` module:
         self.stem_cls = nn.Sequential(*stem_cls)
@@ -88,7 +101,11 @@ class FCOSPredictionNetwork(nn.Module):
         self.pred_ctr = None  # Centerness conv
 
         # Replace "pass" statement with your code
-        pass
+        
+        self.pred_cls = nn.Conv2d(stem_channels[-1], num_classes, kernel_size=3, padding=1)
+        self.pred_box = nn.Conv2d(stem_channels[-1], 4, kernel_size=3, padding=1)
+        self.pred_ctr = nn.Conv2d(stem_channels[-1], 1, kernel_size=3, padding=1)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -135,7 +152,17 @@ class FCOSPredictionNetwork(nn.Module):
         centerness_logits = {}
 
         # Replace "pass" statement with your code
-        pass
+        
+        for pi, feat in feats_per_fpn_level.items():
+            pred_cls_output = self.pred_cls(self.stem_cls(feat))
+            N, _, H,W = pred_cls_output.shape
+            class_logits[pi] = pred_cls_output.permute(0,2,3,1).contiguous().view(N,W*H,-1)
+            shared_stem_box = self.stem_box(feat)
+            pred_box_output = self.pred_box(shared_stem_box)
+            boxreg_deltas[pi] = pred_box_output.permute(0,2,3,1).contiguous().view(N,W*H,-1)
+            pred_ctr_output = self.pred_ctr(shared_stem_box)
+            centerness_logits[pi] = pred_ctr_output.permute(0,2,3,1).contiguous().view(N,W*H,-1)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
