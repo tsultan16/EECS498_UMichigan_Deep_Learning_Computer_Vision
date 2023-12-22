@@ -425,7 +425,10 @@ class FCOS(nn.Module):
         self.backbone = None
         self.pred_net = None
         # Replace "pass" statement with your code
-        pass
+        
+        self.backbone = DetectorBackboneWithFPN(fpn_channels)
+        self.pred_net = FCOSPredictionNetwork(num_classes, fpn_channels, stem_channels)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -469,7 +472,9 @@ class FCOS(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         pred_cls_logits, pred_boxreg_deltas, pred_ctr_logits = None, None, None
         # Replace "pass" statement with your code
-        pass
+        
+        fpn_feats = self.backbone.forward(images)
+        pred_cls_logits, pred_boxreg_deltas, pred_ctr_logits = self.pred_net.forward(fpn_feats)
 
         ######################################################################
         # TODO: Get absolute co-ordinates `(xc, yc)` for every location in
@@ -481,7 +486,11 @@ class FCOS(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         locations_per_fpn_level = None
         # Replace "pass" statement with your code
-        pass
+        
+        fpn_feats_shapes = {level_name: feat.shape for level_name, feat in fpn_feats.items()}
+        strides_per_fpn_level = self.backbone.fpn_strides
+        locations_per_fpn_level = get_fpn_location_coords(fpn_feats_shapes, strides_per_fpn_level, device=images.device)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -507,13 +516,30 @@ class FCOS(nn.Module):
         # boxes for locations per FPN level, per image. Fill this list:
         matched_gt_boxes = []
         # Replace "pass" statement with your code
-        pass
-
+        
+        
+        B, _, _ = gt_boxes.shape
+        for i in range(B):
+            matched_gt_boxes.append(fcos_match_locations_to_gt(locations_per_fpn_level, strides_per_fpn_level, gt_boxes[i]))
+        
+        
         # Calculate GT deltas for these matched boxes. Similar structure
         # as `matched_gt_boxes` above. Fill this list:
         matched_gt_deltas = []
+        matched_gt_centerness = []
         # Replace "pass" statement with your code
-        pass
+
+        
+        for i in range(B):
+            deltas_dict = {}
+            centerness_dict = {}
+            for pi in matched_gt_boxes[i].keys():
+                deltas_dict[pi] = fcos_get_deltas_from_locations(locations_per_fpn_level[pi], matched_gt_boxes[i][pi], strides_per_fpn_level[pi])
+                centerness_dict[pi] = fcos_make_centerness_targets(deltas_dict[pi])
+
+            matched_gt_deltas.append(deltas_dict)
+            matched_gt_centerness.append(centerness_dict)
+        
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -521,18 +547,24 @@ class FCOS(nn.Module):
         # Collate lists of dictionaries, to dictionaries of batched tensors.
         # These are dictionaries with keys {"p3", "p4", "p5"} and values as
         # tensors of shape (batch_size, locations_per_fpn_level, 5 or 4)
+        
         matched_gt_boxes = default_collate(matched_gt_boxes)
         matched_gt_deltas = default_collate(matched_gt_deltas)
+        matched_gt_centerness = default_collate(matched_gt_centerness)
 
         # Combine predictions and GT from across all FPN levels.
         # shape: (batch_size, num_locations_across_fpn_levels, ...)
+        
         matched_gt_boxes = self._cat_across_fpn_levels(matched_gt_boxes)
         matched_gt_deltas = self._cat_across_fpn_levels(matched_gt_deltas)
+        matched_gt_centerness = self._cat_across_fpn_levels(matched_gt_centerness)
+
         pred_cls_logits = self._cat_across_fpn_levels(pred_cls_logits)
         pred_boxreg_deltas = self._cat_across_fpn_levels(pred_boxreg_deltas)
         pred_ctr_logits = self._cat_across_fpn_levels(pred_ctr_logits)
 
         # Perform EMA update of normalizer by number of positive locations.
+        
         num_pos_locations = (matched_gt_boxes[:, :, 4] != -1).sum()
         pos_loc_per_image = num_pos_locations.item() / images.shape[0]
         self._normalizer = 0.9 * self._normalizer + 0.1 * pos_loc_per_image
@@ -545,8 +577,27 @@ class FCOS(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         loss_cls, loss_box, loss_ctr = None, None, None
 
+        pred_boxreg_deltas = pred_boxreg_deltas.view(-1, 4)
+        matched_gt_deltas = matched_gt_deltas.view(-1, 4) 
+        pred_ctr_logits = pred_ctr_logits.view(-1)
+        matched_gt_centerness = matched_gt_centerness.view(-1) 
+
+        #print(f"matched_gt_boxes shape: {matched_gt_boxes.shape}")
+        #print(f"matched_gt_deltas shape: {matched_gt_deltas.shape}")
+        #print(f"matched_gt_centerness shape: {matched_gt_centerness.shape}")
+        #print(f"Unique labels: {torch.unique(matched_gt_boxes[:,:,-1])}")
+
         # Replace "pass" statement with your code
-        pass
+        matched_gt_boxes_one_hot = torch.nn.functional.one_hot((matched_gt_boxes[:,:,-1]+1).long(), num_classes=21)
+        loss_cls = sigmoid_focal_loss(pred_cls_logits, matched_gt_boxes_one_hot[:,:,1:].float())
+        loss_box = 0.25 * F.l1_loss(pred_boxreg_deltas, matched_gt_deltas, reduction='none')
+        loss_ctr = F.binary_cross_entropy_with_logits(pred_ctr_logits, matched_gt_centerness, reduction='none')
+
+        # zero box and centreness loss for background
+        loss_box[matched_gt_deltas<0] = 0.0
+        loss_ctr[matched_gt_centerness<0] = 0.0
+
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################

@@ -188,8 +188,6 @@ def get_fpn_location_coords(
 
         _, _, H, W = feat_shape
         ygrid, xgrid = torch.meshgrid(torch.arange(H, dtype=dtype, device=device), torch.arange(W, dtype=dtype, device=device), indexing='ij')
-        print(ygrid)
-        print(xgrid)
         grid = torch.stack((ygrid, xgrid), dim=-1)
         location_coords[level_name] = (level_stride * (grid + 0.5)).view(-1,2)
 
