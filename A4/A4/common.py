@@ -229,7 +229,47 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+
+    def IoU(box1, box2):
+        x1, y1, x2, y2 = box1
+        x1p, y1p, x2p, y2p = box2
+        # define box 1 to be the box whose top-left corner is to the left of the top-left corner of the other box
+        if box2[0] < box1[0]:
+           x1, y1, x2, y2 = box2
+           x1p, y1p, x2p, y2p = box1
+        # area of intersection
+        A_int = max(0, min(x2,x2p)-x1p ) * max(0, min(y2,y2p)-max(y1,y1p) )
+        # area of union
+        A_U = (x2-x1)*(y2-y1) + (x2p-x1p)*(y2p-y1p) - A_int
+        return A_int/A_U             
+
+    # sort in decreasing order of scores
+    scores_sorted, sorted_idx = scores.sort(descending=True)
+    boxes_sorted = boxes[sorted_idx]
+
+    # convert to lists
+    idx_list = sorted_idx.tolist()
+    boxes_list = boxes_sorted.tolist()
+     
+    done = False
+    next_highest_idx = 0
+    while not done:
+        # select next highest scoring box
+        highest_box = boxes_list[next_highest_idx]
+        # iterate over all other remianing boxes and remove ones for which IoU with highest box
+        # greater than threshold
+        for box, idx in zip(boxes_list[next_highest_idx+1:], idx_list[next_highest_idx+1:]):
+            if IoU(highest_box, box) >  iou_threshold:
+                boxes_list.remove(box)
+                idx_list.remove(idx)
+
+        next_highest_idx += 1
+        if next_highest_idx >= len(boxes_list)-1:
+            done = True
+
+    keep = torch.tensor(idx_list, dtype=torch.long)
+
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################
