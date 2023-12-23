@@ -61,7 +61,16 @@ class RPNPredictionNetwork(nn.Module):
         # `FCOSPredictionNetwork` for this code block.
         stem_rpn = []
         # Replace "pass" statement with your code
-        pass
+        
+        schannels = [in_channels] + stem_channels
+        for i in range(1,len(schannels)):
+            stem_rpn.append(nn.Conv2d(schannels[i-1], schannels[i], kernel_size=3, padding=1))
+            stem_rpn.append(nn.ReLU())
+
+        # initialize the weights
+        for i in range(0,len(stem_rpn),2):
+            torch.nn.init.normal_(stem_rpn[i].weight, mean=0.0, std=0.01)
+            torch.nn.init.constant_(stem_rpn[i].bias, 0.0)
 
         # Wrap the layers defined by student into a `nn.Sequential` module:
         self.stem_rpn = nn.Sequential(*stem_rpn)
@@ -79,7 +88,13 @@ class RPNPredictionNetwork(nn.Module):
         self.pred_box = None  # Box regression conv
 
         # Replace "pass" statement with your code
-        pass
+        
+        # 1x1 conv with k output channels for binary classification of anchors at every spatial feature point
+        self.pred_obj = nn.Conv2d(stem_channels[-1], num_anchors, kernel_size=1)
+        
+        # 1x1 conv with 4k output channels for bbox transform regression of anchors at every spatial feature point
+        self.pred_box = nn.Conv2d(stem_channels[-1], 4*num_anchors, kernel_size=1)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -111,7 +126,21 @@ class RPNPredictionNetwork(nn.Module):
         boxreg_deltas = {}
 
         # Replace "pass" statement with your code
-        pass
+        
+        for p in feats_per_fpn_level.keys():
+            feats = feats_per_fpn_level[p]
+            N = feats.shape[0]
+            # compute shared stem output
+            feats_stem = self.stem_rpn(feats)
+            # compute stage 1 outputs (anchor classification logits and bbox regression deltas)
+            object_logits[p] = self.pred_obj(feats_stem)
+            boxreg_deltas[p] = self.pred_box(feats_stem)
+
+            # reshape object_logits: (N, K, H, W) -> (N, H, W, K) -> (N, H*W, K)
+            object_logits[p] = object_logits[p].permute(0,2,3,1).contiguous().view(N,-1,self.num_anchors)  
+            # reshape boxreg_deltas: (N, 4K, H, W) -> (N, H, W, 4K) -> (N, H*W, 4K)
+            boxreg_deltas[p] = boxreg_deltas[p].permute(0,2,3,1).contiguous().view(N,-1,4*self.num_anchors)  
+            
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -177,7 +206,21 @@ def generate_fpn_anchors(
             # locations to get top-left and bottom-right co-ordinates.
             ##################################################################
             # Replace "pass" statement with your code
-            pass
+            
+            area = (stride_scale*level_stride)**2
+            new_width = (area/aspect_ratio)**(0.5)
+            new_height = area / new_width
+
+            anchors = torch.zeros(size=(locations.shape[0],4))
+            # compute anchor box top-left corner coordinates
+            anchors[:,0] = locations[:,0] - 0.5*new_width 
+            anchors[:,1] = locations[:,1] - 0.5*new_height 
+            # compute bottom-right corner coordinates
+            anchors[:,2] = locations[:,0] + 0.5*new_width 
+            anchors[:,3] = locations[:,1] + 0.5*new_height 
+
+            anchor_boxes.append(anchors)
+
             ##################################################################
             #                           END OF YOUR CODE                     #
             ##################################################################
@@ -211,7 +254,21 @@ def iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
     # TODO: Implement the IoU function here.                                 #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+
+    M = boxes1.shape[0]
+    N = boxes2.shape[0] 
+
+    iou = torch.zeros(size=(M,N), dtype=boxes1.dtype, device=boxes1.device)
+    for i in range(M):
+        for j in range(N):
+            x1, y1, x2, y2 = boxes1[i]
+            x1p, y1p, x2p, y2p = boxes2[j]
+            # area of intersection
+            A_int = max(0, min(x2,x2p)-max(x1,x1p) ) * max(0, min(y2,y2p)-max(y1,y1p) )
+            # area of union
+            A_U = (x2-x1)*(y2-y1) + (x2p-x1p)*(y2p-y1p) - A_int
+            iou[i,j] = A_int/A_U
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
