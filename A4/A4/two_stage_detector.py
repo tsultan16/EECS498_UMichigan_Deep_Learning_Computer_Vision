@@ -211,7 +211,7 @@ def generate_fpn_anchors(
             new_width = (area/aspect_ratio)**(0.5)
             new_height = area / new_width
 
-            anchors = torch.zeros(size=(locations.shape[0],4))
+            anchors = torch.zeros(size=(locations.shape[0],4), device=locations.device)
             # compute anchor box top-left corner coordinates
             anchors[:,0] = locations[:,0] - 0.5*new_width 
             anchors[:,1] = locations[:,1] - 0.5*new_height 
@@ -355,7 +355,33 @@ def rcnn_get_deltas_from_anchors(
     ##########################################################################
     deltas = None
     # Replace "pass" statement with your code
-    pass
+    
+    # anchor width and height
+    pw = anchors[:,2]-anchors[:,0]
+    ph = anchors[:,3]-anchors[:,1]
+    # anchor center
+    px = anchors[:,0] + 0.5*pw
+    py = anchors[:,1] + 0.5*ph
+    # gt box width and height
+    bw = gt_boxes[:,2]-gt_boxes[:,0]
+    bh = gt_boxes[:,3]-gt_boxes[:,1]
+    # gt box center
+    bx = gt_boxes[:,0] + 0.5*bw
+    by = gt_boxes[:,1] + 0.5*bh
+
+    deltas = torch.zeros_like(anchors)
+    # shift dx
+    deltas[:,0] = (bx - px) / pw   
+    # shift dy
+    deltas[:,1] = (by - py) / ph
+    # scale dw
+    deltas[:,2] = torch.log(bw / pw)   
+    # scale dh
+    deltas[:,3] = torch.log(bh / ph)   
+
+    # set background box deltas to -1e-8
+    deltas[gt_boxes[:,:4] < 0] = -1e-8
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -385,12 +411,38 @@ def rcnn_apply_deltas_to_anchors(
     deltas[:, 2] = torch.clamp(deltas[:, 2], max=scale_clamp)
     deltas[:, 3] = torch.clamp(deltas[:, 3], max=scale_clamp)
 
+    #print(anchors.device)
+    #print(deltas.device)
+
     ##########################################################################
     # TODO: Implement the transformation logic to get output boxes.          #
     ##########################################################################
     output_boxes = None
     # Replace "pass" statement with your code
-    pass
+    
+    # anchor width and height
+    pw = anchors[:,2]-anchors[:,0]
+    ph = anchors[:,3]-anchors[:,1]
+    # anchor center
+    px = anchors[:,0] + 0.5*pw
+    py = anchors[:,1] + 0.5*ph
+    # box center coordinates
+    bx = px + pw * deltas[:,0]
+    by = py + ph * deltas[:,1]
+    # box width and height
+    bw = pw * torch.exp(deltas[:,2]) 
+    bh = ph * torch.exp(deltas[:,3]) 
+
+    # box top-left and bottom-right coordinates
+    output_boxes = torch.zeros_like(anchors)
+    output_boxes[:,0] = bx - 0.5*bw 
+    output_boxes[:,1] = by - 0.5*bh 
+    output_boxes[:,2] = bx + 0.5*bw 
+    output_boxes[:,3] = by + 0.5*bh 
+
+    # set background/neutral output box values to -1e-8
+    output_boxes[deltas[:,:4] < 0] = -1e-8
+    
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -561,7 +613,14 @@ class RPN(nn.Module):
             None,
         )
         # Replace "pass" statement with your code
-        pass
+
+        # forward pass through RPN
+        pred_obj_logits, pred_boxreg_deltas = self.pred_net.forward(feats_per_fpn_level) 
+        # generate anchor boxes
+        shape_per_fpn_level = {level_name: feat.shape for level_name, feat in feats_per_fpn_level.items()}
+        locations_per_fpn_level = get_fpn_location_coords(shape_per_fpn_level, strides_per_fpn_level, device=feats_per_fpn_level["p3"].device)
+        anchors_per_fpn_level = generate_fpn_anchors(locations_per_fpn_level, strides_per_fpn_level, self.anchor_stride_scale, self.anchor_aspect_ratios)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -601,7 +660,10 @@ class RPN(nn.Module):
         # giving matching GT boxes to anchor boxes). Fill this list:
         matched_gt_boxes = []
         # Replace "pass" statement with your code
-        pass
+
+        for batch_idx in range(num_images):
+            matched_gt_boxes.append(rcnn_match_anchors_to_gt(anchor_boxes, gt_boxes[batch_idx], self.anchor_iou_thresholds))
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -642,7 +704,29 @@ class RPN(nn.Module):
             # Feel free to delete this line: (but keep variable names same)
             loss_obj, loss_box = None, None
             # Replace "pass" statement with your code
-            pass
+            
+            fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image, fg_fraction=0.5)
+            
+            # foreground and background prediction subsets
+            pred_obj_logits_fg = pred_obj_logits[fg_idx]
+            pred_obj_logits_bg = pred_obj_logits[bg_idx]
+            pred_boxreg_deltas_fg = pred_boxreg_deltas[fg_idx]
+            matched_gt_boxes_fg = matched_gt_boxes[fg_idx]
+            anchor_boxes_fg = anchor_boxes[fg_idx]
+
+            # targets
+            target_obj_fg = torch.ones_like(pred_obj_logits_fg)
+            target_obj_bg = torch.zeros_like(pred_obj_logits_bg)
+            target_deltas_fg = rcnn_get_deltas_from_anchors(anchor_boxes_fg, matched_gt_boxes_fg)
+
+            # compute objectness loss
+            pred_obj_logits_sampled = torch.cat((pred_obj_logits_fg, pred_obj_logits_bg), dim=0)
+            target_obj = torch.cat((target_obj_fg, target_obj_bg), dim=0)
+            loss_obj = F.binary_cross_entropy_with_logits(pred_obj_logits_sampled, target_obj, reduction="none")
+
+            # compute box regression loss (only for foreground anchors)
+            loss_box = F.l1_loss(pred_boxreg_deltas_fg, target_deltas_fg, reduction="none")
+
             ##################################################################
             #                         END OF YOUR CODE                       #
             ##################################################################
@@ -710,7 +794,19 @@ class RPN(nn.Module):
                 # different shapes, you need to make some intermediate views.
                 ##############################################################
                 # Replace "pass" statement with your code
-                pass
+        
+                # transform anchors to region proposal boxes
+                level_proposals = rcnn_apply_deltas_to_anchors(level_boxreg_deltas[_batch_idx].view(-1,4), level_anchors) # shape = (HWA,4)
+
+                # retain topk highest score boxes
+                k = min(level_obj_logits[_batch_idx].view(-1).shape[0], self.pre_nms_topk)
+                topk_obj_logits, topk_idx = torch.topk(level_obj_logits[_batch_idx].view(-1), k)
+                level_proposals_topk = level_proposals[topk_idx]
+                # apply nms
+                nms_idx = torchvision.ops.nms(level_proposals_topk, topk_obj_logits, self.nms_thresh)
+                level_proposals_nms = level_proposals_topk[nms_idx][:self.post_nms_topk]
+                level_proposals_per_image.append(level_proposals_nms)
+
                 ##############################################################
                 #                        END OF YOUR CODE                    #
                 ##############################################################
