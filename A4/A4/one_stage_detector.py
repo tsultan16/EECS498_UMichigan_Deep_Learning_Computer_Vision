@@ -516,19 +516,16 @@ class FCOS(nn.Module):
         # boxes for locations per FPN level, per image. Fill this list:
         matched_gt_boxes = []
         # Replace "pass" statement with your code
-        
-        
+                
         B, _, _ = gt_boxes.shape
         for i in range(B):
             matched_gt_boxes.append(fcos_match_locations_to_gt(locations_per_fpn_level, strides_per_fpn_level, gt_boxes[i]))
-        
         
         # Calculate GT deltas for these matched boxes. Similar structure
         # as `matched_gt_boxes` above. Fill this list:
         matched_gt_deltas = []
         matched_gt_centerness = []
         # Replace "pass" statement with your code
-
         
         for i in range(B):
             deltas_dict = {}
@@ -582,11 +579,6 @@ class FCOS(nn.Module):
         pred_ctr_logits = pred_ctr_logits.view(-1)
         matched_gt_centerness = matched_gt_centerness.view(-1) 
 
-        #print(f"matched_gt_boxes shape: {matched_gt_boxes.shape}")
-        #print(f"matched_gt_deltas shape: {matched_gt_deltas.shape}")
-        #print(f"matched_gt_centerness shape: {matched_gt_centerness.shape}")
-        #print(f"Unique labels: {torch.unique(matched_gt_boxes[:,:,-1])}")
-
         # Replace "pass" statement with your code
         matched_gt_boxes_one_hot = torch.nn.functional.one_hot((matched_gt_boxes[:,:,-1]+1).long(), num_classes=21)
         loss_cls = sigmoid_focal_loss(pred_cls_logits, matched_gt_boxes_one_hot[:,:,1:].float())
@@ -596,7 +588,6 @@ class FCOS(nn.Module):
         # zero box and centreness loss for background
         loss_box[matched_gt_deltas<0] = 0.0
         loss_ctr[matched_gt_centerness<0] = 0.0
-
 
         ######################################################################
         #                            END OF YOUR CODE                        #
@@ -650,6 +641,8 @@ class FCOS(nn.Module):
                   to corresponding logits.
         """
 
+        _, _, H, W = images.shape
+
         # Gather scores and boxes from all FPN levels in this list. Once
         # gathered, we will perform NMS to filter highly overlapping predictions.
         pred_boxes_all_levels = []
@@ -693,19 +686,31 @@ class FCOS(nn.Module):
             )
             # Step 1:
             # Replace "pass" statement with your code
-            pass
+            
+            most_confident_score, most_confident_class = level_pred_scores.max(dim=1)
 
             # Step 2:
             # Replace "pass" statement with your code
-            pass
+            
+            keep = most_confident_score > test_score_thresh
+            level_pred_classes = most_confident_class[keep]
+            level_pred_scores = most_confident_score[keep]
+            level_locations = level_locations[keep]
+            level_deltas = level_deltas[keep]
 
             # Step 3:
             # Replace "pass" statement with your code
-            pass
+            
+            level_pred_boxes = fcos_apply_deltas_to_locations(level_deltas, level_locations, self.backbone.fpn_strides[level_name])
 
             # Step 4: Use `images` to get (height, width) for clipping.
             # Replace "pass" statement with your code
-            pass
+
+            level_pred_boxes[:,0].clamp_(min=0, max=W)
+            level_pred_boxes[:,1].clamp_(min=0, max=H)
+            level_pred_boxes[:,2].clamp_(min=0, max=W)
+            level_pred_boxes[:,3].clamp_(min=0, max=H)
+
             ##################################################################
             #                          END OF YOUR CODE                      #
             ##################################################################

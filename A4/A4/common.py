@@ -230,16 +230,11 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     #############################################################################
     # Replace "pass" statement with your code
     
-
     def IoU(box1, box2):
         x1, y1, x2, y2 = box1
         x1p, y1p, x2p, y2p = box2
-        # define box 1 to be the box whose top-left corner is to the left of the top-left corner of the other box
-        if box2[0] < box1[0]:
-           x1, y1, x2, y2 = box2
-           x1p, y1p, x2p, y2p = box1
         # area of intersection
-        A_int = max(0, min(x2,x2p)-x1p ) * max(0, min(y2,y2p)-max(y1,y1p) )
+        A_int = max(0, min(x2,x2p)-max(x1,x1p) ) * max(0, min(y2,y2p)-max(y1,y1p) )
         # area of union
         A_U = (x2-x1)*(y2-y1) + (x2p-x1p)*(y2p-y1p) - A_int
         return A_int/A_U             
