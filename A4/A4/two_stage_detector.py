@@ -980,13 +980,13 @@ class FasterRCNN(nn.Module):
             level_feats = feats_per_fpn_level[level_name]
             level_props = output_dict["proposals"][level_name]
             level_stride = self.backbone.fpn_strides[level_name]
-
+ 
             # Replace "pass" statement with your code
             #print(f"level: {level_name}, stride: {level_stride}, level_feats shape: {level_feats.shape}")
-            total_boxes = sum([proposals.shape[0] for proposals in level_props])
+            #total_boxes = sum([proposals.shape[0] for proposals in level_props])
             #print(f"total number of boxes: {total_boxes}")
 
-            # roi align on entire batch (seems to require excessive memory, makes program crash)
+            # roi align on entire batch (seems to require excessive memory, makes program crash if using CPU)
             roi_feats = torchvision.ops.roi_align(input=level_feats, boxes=level_props, output_size=self.roi_size, spatial_scale=(1/level_stride), aligned=True)
 
             # roi align on each image separately
@@ -1074,7 +1074,8 @@ class FasterRCNN(nn.Module):
         loss_cls = None
         # Replace "pass" statement with your code
         
-        fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image*num_images, fg_fraction=0.25)
+        #fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image*num_images, fg_fraction=0.25)
+        fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image*num_images, fg_fraction=0.5)
 
         #print(f"Num samples: {self.batch_size_per_image}, Num foreground: {fg_idx.shape}, Num background: {bg_idx.shape}")
 
@@ -1094,6 +1095,11 @@ class FasterRCNN(nn.Module):
         pred = torch.cat((pred_cls_logits_fg, pred_cls_logits_bg), dim=0)
         target = torch.cat((cls_target_fg, cls_target_bg), dim=0).long()
         loss_cls = F.cross_entropy(pred, target)
+
+
+        #_, pred_class = pred.max(dim=1)
+        #print(f"sampled prediction best class: \n{pred_class}")
+        #print(f"sampled targets: \n{target}")
 
         ######################################################################
         #                           END OF YOUR CODE                         #
@@ -1165,7 +1171,25 @@ class FasterRCNN(nn.Module):
         ######################################################################
         pred_scores, pred_classes = None, None
         # Replace "pass" statement with your code
-        pass
+
+        #print(f"prediction logits: \n{pred_cls_logits}")
+
+        # sofmax scores over classes for every box
+        pred_scores = F.softmax(pred_cls_logits)
+        #print(f"prediction scores: \n{pred_scores}")
+
+        # get most confident class and score
+        pred_scores, pred_classes = pred_scores.max(dim=1)
+        # shift class labels
+        pred_classes = pred_classes-1
+       
+        print(f"Unique predicted class labels: {torch.unique(pred_classes)}")
+
+        # retain predictions with score above threshold
+        mask = pred_scores > test_score_thresh
+        pred_scores = pred_scores[mask]
+        pred_classes = pred_classes[mask]
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -1177,4 +1201,12 @@ class FasterRCNN(nn.Module):
         pred_boxes = pred_boxes[keep]
         pred_classes = pred_classes[keep]
         pred_scores = pred_scores[keep]
+
+        print(f"pred boxes shape: {pred_boxes.shape}")
+        #print(f"pred boxes shape: {pred_classes.shape}")
+        #print(f"pred scores shape: {pred_scores.shape}")
+
+        #print(f"pred boxes: \n{pred_boxes}")
+        #print(f"pred classes: {pred_classes}")
+
         return pred_boxes, pred_classes, pred_scores
