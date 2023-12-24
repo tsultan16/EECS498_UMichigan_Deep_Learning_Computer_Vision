@@ -621,6 +621,12 @@ class RPN(nn.Module):
         locations_per_fpn_level = get_fpn_location_coords(shape_per_fpn_level, strides_per_fpn_level, device=feats_per_fpn_level["p3"].device)
         anchors_per_fpn_level = generate_fpn_anchors(locations_per_fpn_level, strides_per_fpn_level, self.anchor_stride_scale, self.anchor_aspect_ratios)
 
+        #print(f"gt boxes shape: {gt_boxes.shape}")
+        #print(f"Unique gt box labels: {torch.unique(gt_boxes[:,:,-1])}")
+        #for p, feats in feats_per_fpn_level.items():
+        #    print(f" FPN level: {p}, feature map shape: {feats.shape}, anchors shape: {anchors_per_fpn_level[p].shape}")
+        #    print(f"\t pred_obj_logits shape: {pred_obj_logits[p].shape}, pred_boxreg_deltas shape: {pred_boxreg_deltas[p].shape}")
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -656,6 +662,8 @@ class RPN(nn.Module):
         # distinction of boxes across different levels (for training).
         anchor_boxes = self._cat_across_fpn_levels(anchors_per_fpn_level, dim=0)
 
+        #print(f"Merged anchors from all levels, shape: {anchor_boxes.shape}")
+
         # Get matched GT boxes (list of B tensors, each of shape `(H*W*A, 5)`
         # giving matching GT boxes to anchor boxes). Fill this list:
         matched_gt_boxes = []
@@ -671,9 +679,15 @@ class RPN(nn.Module):
         # Combine matched boxes from all images to a `(B, HWA, 5)` tensor.
         matched_gt_boxes = torch.stack(matched_gt_boxes, dim=0)
 
+        #print(f"Matched gt boxes shape: {matched_gt_boxes.shape}")
+        #print(f"Unique matched anchor box labels: {torch.unique(matched_gt_boxes[:,:,-1])}")
+
         # Combine predictions across all FPN levels.
         pred_obj_logits = self._cat_across_fpn_levels(pred_obj_logits)
         pred_boxreg_deltas = self._cat_across_fpn_levels(pred_boxreg_deltas)
+
+        #print(f"pred_obj_logits shape: {pred_obj_logits.shape}")
+        #print(f"pred_boxreg_deltas shape: {pred_boxreg_deltas.shape}")
 
         if self.training:
             # Repeat anchor boxes `batch_size` times so there is a 1:1
@@ -693,7 +707,7 @@ class RPN(nn.Module):
             #      `matched_gt_boxes` to `sample_rpn_training` function and
             #      use those indices to get subset of predictions and targets.
             #      RPN samples 50-50% foreground/background anchors, unless
-            #      there aren't enough foreground anchors.
+            #      there aren't enough fopred_boxreg_deltasreground anchors.
             #
             #   2. Compute GT targets for box regression (you have implemented
             #      the transformation function already).
@@ -704,17 +718,32 @@ class RPN(nn.Module):
             # Feel free to delete this line: (but keep variable names same)
             loss_obj, loss_box = None, None
             # Replace "pass" statement with your code
+
+            #print(f"matched_gt_boxes shape: {matched_gt_boxes.shape}")
+            #print(f"batch repeated anchor_boxes shape: {anchor_boxes.shape}")
+            #print(f"collapsed pred_obj_logits shape: {pred_obj_logits.shape}")
+            #print(f"collapsed pred_boxreg_deltas shape: {pred_boxreg_deltas.shape}")
             
-            fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image, fg_fraction=0.5)
-            
+            # get batch_size_per_image*num_images samples of matched anchors, 50% foreground-50% background
+            fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image*num_images, fg_fraction=0.5)
+
+            #print(f"Num samples: {self.batch_size_per_image}, Num foreground: {fg_idx.shape}, Num background: {bg_idx.shape}")
+
             # foreground and background prediction subsets
             pred_obj_logits_fg = pred_obj_logits[fg_idx]
             pred_obj_logits_bg = pred_obj_logits[bg_idx]
             pred_boxreg_deltas_fg = pred_boxreg_deltas[fg_idx]
+            #pred_boxreg_deltas_bg = pred_boxreg_deltas[bg_idx]
             matched_gt_boxes_fg = matched_gt_boxes[fg_idx]
+            #matched_gt_boxes_bg = matched_gt_boxes[bg_idx]
             anchor_boxes_fg = anchor_boxes[fg_idx]
+            #anchor_boxes_bg = anchor_boxes[bg_idx]
 
-            # targets
+            # check the foreground and background indices with matched anchor boxes labels
+            #print(f"Matched gt_boxes foreground: \n{matched_gt_boxes_fg}")
+            #print(f"Matched gt_boxes background: \n{matched_gt_boxes_bg}")
+
+            # prepare targets
             target_obj_fg = torch.ones_like(pred_obj_logits_fg)
             target_obj_bg = torch.zeros_like(pred_obj_logits_bg)
             target_deltas_fg = rcnn_get_deltas_from_anchors(anchor_boxes_fg, matched_gt_boxes_fg)
@@ -724,7 +753,7 @@ class RPN(nn.Module):
             target_obj = torch.cat((target_obj_fg, target_obj_bg), dim=0)
             loss_obj = F.binary_cross_entropy_with_logits(pred_obj_logits_sampled, target_obj, reduction="none")
 
-            # compute box regression loss (only for foreground anchors)
+            # compute box regression loss (only for foreground matched anchors, zero loss for background)
             loss_box = F.l1_loss(pred_boxreg_deltas_fg, target_deltas_fg, reduction="none")
 
             ##################################################################
@@ -806,6 +835,8 @@ class RPN(nn.Module):
                 nms_idx = torchvision.ops.nms(level_proposals_topk, topk_obj_logits, self.nms_thresh)
                 level_proposals_nms = level_proposals_topk[nms_idx][:self.post_nms_topk]
                 level_proposals_per_image.append(level_proposals_nms)
+
+
 
                 ##############################################################
                 #                        END OF YOUR CODE                    #
