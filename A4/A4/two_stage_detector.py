@@ -411,9 +411,6 @@ def rcnn_apply_deltas_to_anchors(
     deltas[:, 2] = torch.clamp(deltas[:, 2], max=scale_clamp)
     deltas[:, 3] = torch.clamp(deltas[:, 3], max=scale_clamp)
 
-    #print(anchors.device)
-    #print(deltas.device)
-
     ##########################################################################
     # TODO: Implement the transformation logic to get output boxes.          #
     ##########################################################################
@@ -787,6 +784,8 @@ class RPN(nn.Module):
                     XYXY co-ordinates of predicted proposals. These will serve
                     as anchor boxes for the second stage.
         """
+ 
+        width, height = image_size
 
         # Gather proposals from all FPN levels in this list.
         proposals_all_levels = {
@@ -834,9 +833,13 @@ class RPN(nn.Module):
                 # apply nms
                 nms_idx = torchvision.ops.nms(level_proposals_topk, topk_obj_logits, self.nms_thresh)
                 level_proposals_nms = level_proposals_topk[nms_idx][:self.post_nms_topk]
+                # clamp the boxes to fit within image
+                level_proposals_nms[:, 0] = torch.clamp(level_proposals_nms[:, 0], min=0, max=width)
+                level_proposals_nms[:, 1] = torch.clamp(level_proposals_nms[:, 1], min=0, max=height)
+                level_proposals_nms[:, 2] = torch.clamp(level_proposals_nms[:, 2], min=0, max=width)
+                level_proposals_nms[:, 3] = torch.clamp(level_proposals_nms[:, 3], min=0, max=height)
+
                 level_proposals_per_image.append(level_proposals_nms)
-
-
 
                 ##############################################################
                 #                        END OF YOUR CODE                    #
@@ -903,7 +906,17 @@ class FasterRCNN(nn.Module):
         # `FCOSPredictionNetwork` for this code block.
         cls_pred = []
         # Replace "pass" statement with your code
-        pass
+        
+        schannels = [self.backbone.out_channels] + stem_channels
+        for i in range(1,len(schannels)):
+            cls_pred.append(nn.Conv2d(schannels[i-1], schannels[i], kernel_size=3, padding=1))
+            cls_pred.append(nn.ReLU())
+
+        # initialize the weights
+        for i in range(0,len(cls_pred),2):
+            torch.nn.init.normal_(cls_pred[i].weight, mean=0.0, std=0.01)
+            torch.nn.init.constant_(cls_pred[i].bias, 0.0)
+
 
         ######################################################################
         # TODO: Add an `nn.Flatten` module to `cls_pred`, followed by a linear
@@ -912,7 +925,11 @@ class FasterRCNN(nn.Module):
         # shape from `nn.Flatten` layer.
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        linear_input_size = roi_size[0] * roi_size[1] * stem_channels[-1]
+        cls_pred.append(nn.Flatten())
+        cls_pred.append(nn.Linear(linear_input_size, num_classes+1))
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -965,7 +982,22 @@ class FasterRCNN(nn.Module):
             level_stride = self.backbone.fpn_strides[level_name]
 
             # Replace "pass" statement with your code
-            pass
+            #print(f"level: {level_name}, stride: {level_stride}, level_feats shape: {level_feats.shape}")
+            total_boxes = sum([proposals.shape[0] for proposals in level_props])
+            #print(f"total number of boxes: {total_boxes}")
+
+            # roi align on entire batch (seems to require excessive memory, makes program crash)
+            roi_feats = torchvision.ops.roi_align(input=level_feats, boxes=level_props, output_size=self.roi_size, spatial_scale=(1/level_stride), aligned=True)
+
+            # roi align on each image separately
+            #roi_feats_per_image = []
+            #for i in range(len(level_props)):
+            #    #print(f"image# {i}, proposal tensor shape: ", level_props[i].shape)
+            #    batch_indices = torch.full((level_props[i].shape[0], 1), i, dtype=torch.float32, device=level_props[i].device)
+            #    level_props_with_batch = torch.cat([batch_indices, level_props[i]], dim=1)
+            #    roi_feats_per_image.append(torchvision.ops.roi_align(input=level_feats[i].unsqueeze(dim=0), boxes=level_props_with_batch, output_size=self.roi_size, #spatial_scale=(1/level_stride), aligned=True)) 
+            #roi_feats = torch.cat(roi_feats_per_image, dim=0)
+            
             ##################################################################
             #                         END OF YOUR CODE                       #
             ##################################################################
@@ -1011,7 +1043,9 @@ class FasterRCNN(nn.Module):
             )
             gt_boxes_per_image = gt_boxes[_idx]
             # Replace "pass" statement with your code
-            pass
+            
+            matched_gt_boxes.append(rcnn_match_anchors_to_gt(proposals_per_image, gt_boxes_per_image, [0.5,0.5]))
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -1039,7 +1073,28 @@ class FasterRCNN(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         loss_cls = None
         # Replace "pass" statement with your code
-        pass
+        
+        fg_idx, bg_idx = sample_rpn_training(matched_gt_boxes, num_samples=self.batch_size_per_image*num_images, fg_fraction=0.25)
+
+        #print(f"Num samples: {self.batch_size_per_image}, Num foreground: {fg_idx.shape}, Num background: {bg_idx.shape}")
+
+        # foreground and background prediction subsets
+        pred_cls_logits_fg = pred_cls_logits[fg_idx]
+        pred_cls_logits_bg = pred_cls_logits[bg_idx]
+
+        # prepare targets (shift by 1 so that labels start from 0 instead of -1)
+        cls_target_fg = matched_gt_boxes[fg_idx,-1] + 1
+        cls_target_bg = matched_gt_boxes[bg_idx,-1] + 1
+
+        # check the foreground and background box labels
+        #print(f"target fg unique values (should be 1-19): \n{torch.unique(cls_target_fg)}")
+        #print(f"target bg unique vaules (should be 0): \n{torch.unique(cls_target_bg)}") 
+    
+        # compute classification loss
+        pred = torch.cat((pred_cls_logits_fg, pred_cls_logits_bg), dim=0)
+        target = torch.cat((cls_target_fg, cls_target_bg), dim=0).long()
+        loss_cls = F.cross_entropy(pred, target)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
