@@ -488,12 +488,15 @@ class CaptioningRNN(nn.Module):
         self.embedding = WordEmbedding(vocab_size, wordvec_dim)
         if cell_type == "rnn":
             self.rnn = RNN(wordvec_dim, hidden_dim)
+            self.feature_proj = nn.Linear(input_dim, hidden_dim)
         elif cell_type == "lstm":
             self.rnn = LSTM(wordvec_dim, hidden_dim)   
+            self.feature_proj = nn.Linear(input_dim, hidden_dim)
         else:
             self.rnn = AttentionLSTM(wordvec_dim, hidden_dim)
+            # for attention lstm, the projection is just a 1x1 convolution
+            self.feature_proj = nn.Conv2d(self.image_encoder.out_channels, hidden_dim, kernel_size=1)
 
-        self.feature_proj = nn.Linear(input_dim, hidden_dim)
         self.output_proj = nn.Linear(hidden_dim, vocab_size)
 
         ######################################################################
@@ -548,13 +551,14 @@ class CaptioningRNN(nn.Module):
         # Replace "pass" statement with your code
 
         # extract image feature map        
-        image_features = self.image_encoder(images) # shape: (N,C,H,W)
+        image_features = self.image_encoder(images) # shape: (N,C,hh,ww)
         N, C, _, _ = image_features.shape
+        if self.cell_type in ('rnn', 'lstm'):
+            # perform average pooling
+            image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
 
-        # perform average pooling
-        image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
         # project into initial hidden state
-        h0 = self.feature_proj(image_features) # (N,H)
+        h0 = self.feature_proj(image_features) # (N,H) / (N,H,hh,ww)
         # convert input indices to word embedding
         embeddings = self.embedding(captions_in) # (N,T,D)
         # compute hidden states at each time step
@@ -629,21 +633,30 @@ class CaptioningRNN(nn.Module):
         # extract image feature map        
         image_features = self.image_encoder(images) # shape: (N,C,H,W)
         N, C, _, _ = image_features.shape
-
-        # perform average pooling
-        image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
-        # project into initial hidden state
-        h0 = self.feature_proj(image_features) # (N,H)
-        prev_h = h0
-        # initialize cell state for LSTM
-        if self.cell_type == "lstm":
-            c0 = torch.zeros_like(h0)
+        if self.cell_type in ('rnn', 'lstm'):
+            # perform average pooling
+            image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
+            # project into initial hidden state
+            h0 = self.feature_proj(image_features) # (N,H) 
+            prev_h = h0
+            if self.cell_type == "lstm":
+                # initialize cell state for LSTM
+                c0 = torch.zeros_like(h0)
+                prev_c = c0
+        
+        else:
+            A = self.feature_proj(image_features) # (N,H,hh,ww)
+            h0 = A.mean(dim=(2, 3)) # (N,H)
+            c0 = h0.clone()
+            prev_h = h0
             prev_c = c0
+        
         # first word set to start token
         captions[:,0] = self._start # (N,max_len)
 
         # generate caption words one by one
         for i in range(0,max_length-1):
+                
             # convert input indices to word embedding
             x = self.embedding(captions[:,i]) # (N,D)
             # perform RNN step
@@ -651,6 +664,10 @@ class CaptioningRNN(nn.Module):
                 next_h = self.rnn.step_forward(x, prev_h) # (N,H) 
             elif self.cell_type == 'lstm':
                 next_h, next_c = self.rnn.step_forward(x, prev_h, prev_c)
+                prev_c = next_c
+            else:
+                attn, _ = dot_product_attention(prev_h, A)
+                next_h, next_c = self.rnn.step_forward(x, prev_h, prev_c, attn)
                 prev_c = next_c
 
             prev_h = next_h         
@@ -887,7 +904,21 @@ class AttentionLSTM(nn.Module):
         #######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        
+        # compute actiavtion
+        A = torch.mm(x, self.Wx) + torch.mm(prev_h, self.Wh) + torch.mm(attn, self.Wattn) + self.b.view(1,-1) # (N, 4H)
+
+        # apply gates
+        H = prev_h.shape[1]
+        i = F.sigmoid(A[:,0:H])     # (N, H)
+        f = F.sigmoid(A[:,H:2*H])   # (N, H)
+        o = F.sigmoid(A[:,2*H:3*H]) # (N, H)
+        g = torch.tanh(A[:,3*H:])    # (N, H)
+
+        # update cell and hidden state
+        next_c = f * prev_c + i * g       # (N, H)
+        next_h = o * torch.tanh(next_c)   # (N, H)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -930,7 +961,21 @@ class AttentionLSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        
+        T = x.shape[1]
+        N, H = h0.shape 
+        hn = torch.zeros(size=(N,T,H), device=h0.device)
+        prev_h = h0 
+        prev_c = c0
+        for i in range(T):
+            # compute scaled dot product attention
+            attn, _ = dot_product_attention(prev_h, A)
+            # step through lstm cell
+            next_h, next_c = self.step_forward(x[:,i,:], prev_h, prev_c, attn)
+            hn[:,i,:] = next_h
+            prev_h = next_h
+            prev_c = next_c
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
