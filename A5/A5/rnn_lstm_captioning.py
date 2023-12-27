@@ -634,7 +634,11 @@ class CaptioningRNN(nn.Module):
         image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
         # project into initial hidden state
         h0 = self.feature_proj(image_features) # (N,H)
-
+        prev_h = h0
+        # initialize cell state for LSTM
+        if self.cell_type == "lstm":
+            c0 = torch.zeros_like(h0)
+            prev_c = c0
         # first word set to start token
         captions[:,0] = self._start # (N,max_len)
 
@@ -643,14 +647,19 @@ class CaptioningRNN(nn.Module):
             # convert input indices to word embedding
             x = self.embedding(captions[:,i]) # (N,D)
             # perform RNN step
-            next_h = self.rnn.step_forward(x, h0) # (N,H)
+            if self.cell_type == 'rnn':
+                next_h = self.rnn.step_forward(x, prev_h) # (N,H) 
+            elif self.cell_type == 'lstm':
+                next_h, next_c = self.rnn.step_forward(x, prev_h, prev_c)
+                prev_c = next_c
+
+            prev_h = next_h         
             # compute prediction scores over vocabulary
-            scores = self.output_proj(next_h)     # (N,V)      
+            scores = self.output_proj(next_h)   # (N,V)      
             # select word with highest score
             _, next_word_idx = torch.max(scores, dim=-1) # (N,)   
             # save to captions
             captions[:,i+1] = next_word_idx
-            h0 = next_h
 
         ######################################################################
         #                           END OF YOUR CODE                         #
@@ -712,7 +721,21 @@ class LSTM(nn.Module):
         ######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        
+        # compute actiavtion
+        A = torch.mm(x, self.Wx) + torch.mm(prev_h, self.Wh) + self.b.view(1,-1) # (N, 4H)
+
+        # apply gates
+        H = prev_h.shape[1]
+        i = F.sigmoid(A[:,0:H])     # (N, H)
+        f = F.sigmoid(A[:,H:2*H])   # (N, H)
+        o = F.sigmoid(A[:,2*H:3*H]) # (N, H)
+        g = torch.tanh(A[:,3*H:])    # (N, H)
+
+        # update cell and hidden state
+        next_c = f * prev_c + i * g       # (N, H)
+        next_h = o * torch.tanh(next_c)   # (N, H)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -746,7 +769,18 @@ class LSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        
+        T = x.shape[1]
+        N, H = h0.shape 
+        hn = torch.zeros(size=(N,T,H), device=h0.device)
+        prev_h = h0 
+        prev_c = c0
+        for i in range(T):
+            next_h, next_c = self.step_forward(x[:,i,:], prev_h, prev_c)
+            hn[:,i,:] = next_h
+            prev_h = next_h
+            prev_c = next_c
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
