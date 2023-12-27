@@ -112,7 +112,11 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     # and cache variables respectively.
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    z = torch.mm(x, Wx) + torch.mm(prev_h, Wh) + b.view(1,-1)  # (N, H)
+    next_h = torch.tanh(z)  # (N, H)
+    cache = (x, z, prev_h, Wx, Wh)
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -142,7 +146,17 @@ def rnn_step_backward(dnext_h, cache):
     # terms of the output value from tanh.
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    x, z, prev_h, Wx, Wh = cache
+
+    dht_dz = 1 - torch.pow(torch.tanh(z), 2) # (N, H)
+    dz = dht_dz * dnext_h # (N, H)
+    db = torch.sum(dz, dim=0) # (H,)
+    dx = torch.mm(dz, Wx.t())
+    dWx = torch.mm(x.t(), dz)
+    dprev_h = torch.mm(dz, Wh.t())
+    dWh = torch.mm(prev_h.t(), dz)
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -174,7 +188,9 @@ def rnn_forward(x, h0, Wx, Wh, b):
     # above. You can use a for loop to help compute the forward pass.
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
