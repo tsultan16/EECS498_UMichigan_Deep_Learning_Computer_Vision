@@ -811,7 +811,19 @@ def dot_product_attention(prev_h, A):
     # functions. HINT: Make sure you reshape attn_weights back to (N, 4, 4)! #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    # reshape (N,H,4,4) - > (N,H,16)
+    A = A.view(N,H,-1)
+    # compute scaled dot product alignment scores
+    W = torch.einsum('ijk,ij->ik', A, prev_h) / math.sqrt(H) # (N,16)
+    # apply softmax to get attention weights
+    attn_weights = F.softmax(W, dim=1) # (N,16) 
+    # compute attention embedding (weighted sum over spatial dimension)
+    attn = torch.einsum('ijk,ik->ij', A, attn_weights) # (N,H)
+    # unflatten spatial dims 
+    A = A.view(N,H,D_a,D_a)    
+    attn_weights = attn_weights.view(N, D_a, D_a)
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
