@@ -356,7 +356,10 @@ class WordEmbedding(nn.Module):
         # TODO: Implement the forward pass for word embeddings.
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # use advanced indexing to the get the rows out of the embedding matrix
+        out = self.W_embed[x]
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -401,7 +404,15 @@ def temporal_softmax_loss(x, y, ignore_index=None):
     # all timesteps and *averaging* across the minibatch.
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    N, T, V = x.shape
+
+    # need to collapse batch and sequence dimension to make tensor compatible with loss function
+    loss = F.cross_entropy(x.reshape(-1,V), y.reshape(-1), ignore_index=ignore_index, reduction='none')
+    # reshape (N*T,) -> (N,T)
+    loss = loss.view(N,T) 
+    # now sum over time steps and compute batch mean
+    loss = loss.sum(dim=-1).mean()
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -472,7 +483,19 @@ class CaptioningRNN(nn.Module):
         # (2) feature projection (from CNN pooled feature to h0)
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.image_encoder = ImageEncoder(pretrained=image_encoder_pretrained)
+        self.embedding = WordEmbedding(vocab_size, wordvec_dim)
+        if cell_type == "rnn":
+            self.rnn = RNN(wordvec_dim, hidden_dim)
+        elif cell_type == "lstm":
+            self.rnn = LSTM(wordvec_dim, hidden_dim)   
+        else:
+            self.rnn = AttentionLSTM(wordvec_dim, hidden_dim)
+
+        self.feature_proj = nn.Linear(input_dim, hidden_dim)
+        self.output_proj = nn.Linear(hidden_dim, vocab_size)
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -523,7 +546,24 @@ class CaptioningRNN(nn.Module):
         # Do not worry about regularizing the weights or their gradients!
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+
+        # extract image feature map        
+        image_features = self.image_encoder(images) # shape: (N,C,H,W)
+        N, C, _, _ = image_features.shape
+
+        # perform average pooling
+        image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
+        # project into initial hidden state
+        h0 = self.feature_proj(image_features) # (N,H)
+        # convert input indices to word embedding
+        embeddings = self.embedding(captions_in) # (N,T,D)
+        # compute hidden states at each time step
+        h = self.rnn(embeddings, h0) # (N,T,H)
+        # transform hidden states to prediction scores over vocab at each time step
+        scores = self.output_proj(h) # (N,T,V)
+        # compute loss
+        loss = temporal_softmax_loss(scores, captions_out, ignore_index=self.ignore_index)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -585,7 +625,33 @@ class CaptioningRNN(nn.Module):
         # would both be A.mean(dim=(2, 3)).
         #######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # extract image feature map        
+        image_features = self.image_encoder(images) # shape: (N,C,H,W)
+        N, C, _, _ = image_features.shape
+
+        # perform average pooling
+        image_features = image_features.view(N,C,-1).mean(dim=-1) # shape: (N,C)
+        # project into initial hidden state
+        h0 = self.feature_proj(image_features) # (N,H)
+
+        # first word set to start token
+        captions[:,0] = self._start # (N,max_len)
+
+        # generate caption words one by one
+        for i in range(0,max_length-1):
+            # convert input indices to word embedding
+            x = self.embedding(captions[:,i]) # (N,D)
+            # perform RNN step
+            next_h = self.rnn.step_forward(x, h0) # (N,H)
+            # compute prediction scores over vocabulary
+            scores = self.output_proj(next_h)     # (N,V)      
+            # select word with highest score
+            _, next_word_idx = torch.max(scores, dim=-1) # (N,)   
+            # save to captions
+            captions[:,i+1] = next_word_idx
+            h0 = next_h
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
