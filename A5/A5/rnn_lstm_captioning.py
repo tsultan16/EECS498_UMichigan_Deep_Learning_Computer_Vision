@@ -666,9 +666,10 @@ class CaptioningRNN(nn.Module):
                 next_h, next_c = self.rnn.step_forward(x, prev_h, prev_c)
                 prev_c = next_c
             else:
-                attn, _ = dot_product_attention(prev_h, A)
+                attn, attn_weights = dot_product_attention(prev_h, A)
                 next_h, next_c = self.rnn.step_forward(x, prev_h, prev_c, attn)
                 prev_c = next_c
+                attn_weights_all[:,i+1,:,:] = attn_weights
 
             prev_h = next_h         
             # compute prediction scores over vocabulary
