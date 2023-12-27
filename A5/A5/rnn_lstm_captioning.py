@@ -189,7 +189,18 @@ def rnn_forward(x, h0, Wx, Wh, b):
     ##########################################################################
     # Replace "pass" statement with your code
     
-    
+    seq_length = x.shape[1]
+    h_list = []
+    cache_list = []
+    prev_h = h0 
+    for i in range(seq_length):
+        next_h, cache = rnn_step_forward(x[:,i,:], prev_h, Wx, Wh, b)
+        h_list.append(next_h)
+        cache_list.append(cache)
+        prev_h = next_h
+
+    h = torch.stack(h_list, dim=1)
+    cache = cache_list    
 
     ##########################################################################
     #                             END OF YOUR CODE                           #
