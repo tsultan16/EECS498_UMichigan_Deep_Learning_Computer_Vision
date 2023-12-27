@@ -234,7 +234,36 @@ def rnn_backward(dh, cache):
     # defined above. You can use a for loop to help compute the backward pass.
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    x, z, prev_h, Wx, Wh = cache[-1]
+
+    N, D = x.shape
+    H = dh.shape[-1]
+    T = len(cache)
+
+    # initialized initial zero grad tensors
+    dx = torch.zeros(size=(N,T,D), device=dh.device)
+    dWx = torch.zeros_like(Wx, device=dh.device)
+    dWh = torch.zeros_like(Wh, device=dh.device)
+    db = torch.zeros(size=(H,), device=dh.device)
+
+    # backward pass loop
+    dprev_h_cell = 0
+    for i in range(len(cache)-1,-1,-1):
+        # combine upstream gradients from both loss and next hidden state
+        dh_cell = dprev_h_cell + dh[:,i,:]
+        # back prop through RNN cell
+        dx_cell, dprev_h_cell, dWx_cell, dWh_cell, db_cell = rnn_step_backward(dh_cell, cache[i])
+        # store x grad
+        dx[:,i,:] = dx_cell    
+        # accumulate W and b grads
+        dWx += dWx_cell
+        dWh += dWh_cell
+        db += db_cell
+
+    # store the grad for initial hidden state
+    dh0 = dprev_h_cell
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
