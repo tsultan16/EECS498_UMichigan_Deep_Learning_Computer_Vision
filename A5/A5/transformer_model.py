@@ -1182,9 +1182,12 @@ class Transformer(nn.Module):
         ##########################################################################
         # Replace "pass" statement with your code
         
+        M = ques_pos.shape[-1]
         enc_out = self.encoder(q_emb_inp)
         mask = get_subsequent_mask(ans_b[:,:-1])
         dec_out = self.decoder(a_emb_inp, enc_out, mask)
+        N, O, M = dec_out.shape
+        dec_out = dec_out.view(N*O,M)
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
