@@ -370,7 +370,7 @@ class SelfAttention(nn.Module):
         key = self.k(key)
         value = self.v(value)
         # compute attention weights and output vectors
-        y, self.weights_softmax = scaled_dot_product_no_loop_batch(query=query, key=key, value=value)
+        y, self.weights_softmax = scaled_dot_product_no_loop_batch(query=query, key=key, value=value, mask=mask)
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
@@ -745,6 +745,10 @@ class EncoderBlock(nn.Module):
         # add residual connection and apply layer norm then dropout
         y = self.dropout(self.ln_2(out2 + out3))
 
+        """x = self.ln_1(x)
+        x = x + self.dropout(self.multihead_attn(x, x, x))
+        y = x + self.dropout(self.feed_forward(self.ln_2(x)))
+        """
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -779,7 +783,7 @@ def get_subsequent_mask(seq):
     # Replace "pass" statement with your code
     N, K = seq.shape
 
-    # create a batch of K x K matrix with ones below diagonal
+    # create a batch of K x K matrix with ones on and below diagonal
     mask = torch.tril(torch.ones(size=(N,K,K)))
     # create mask in which the positions where there is a zero is True 
     mask = (mask == 0)
@@ -875,7 +879,9 @@ class DecoderBlock(nn.Module):
         self.norm2 = LayerNormalization(emb_dim) 
         self.norm3 = LayerNormalization(emb_dim) 
         self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
@@ -910,16 +916,19 @@ class DecoderBlock(nn.Module):
         # compute masked multihead self-attention to compute decoder output vectors
         out1 = self.attention_self(dec_inp, dec_inp, dec_inp, mask)  # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        out2 = self.dropout(self.norm1(dec_inp + out1)) # (N, K, M)       
+        #out2 = self.dropout(self.norm1(dec_inp + out1)) # (N, K, M)       
+        out2 = self.norm1(dec_inp + self.dropout1(out1)) # (N, K, M)       
         # now apply multihead cross attention using the decoder output vectors as query 
         # and encoder output vectors as key and value 
         out3 = self.attention_cross(out2, enc_inp, enc_inp) # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        out4 = self.dropout(self.norm2(out2 + out3)) # (N, K, M)
+        #out4 = self.dropout(self.norm2(out2 + out3)) # (N, K, M)
+        out4 = self.norm2(out2 + self.dropout2(out3)) # (N, K, M)
         # pass through feed forward network
         out5 = self.feed_forward(out4) # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        y = self.dropout(self.norm3(out4 + out5))
+        #y = self.dropout(self.norm3(out4 + out5))
+        y = self.norm3(out4 + self.dropout3(out5))
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
@@ -1067,14 +1076,15 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
     
     y = torch.arange(end=K).view(K,1) # (K,1)
     y = y.expand(K,M) # (K,M)
-    #a = 2*(torch.arange(0,M)//2) / M # (M,)
-    a = 2*(torch.arange(0,M)//2) // M # (M,)
+    a = 2*(torch.arange(0,M)//2) / M # (M,)
+    #a = 2*(torch.arange(0,M)//2) // M # (M,)
     a = torch.pow(10000,a) # (M,)
     a = a.view(1,M)
     y = y / a
     y[:,::2] = torch.sin(y[:,::2])
     y[:,1::2] = torch.cos(y[:,1::2])
 
+    y = y.view(1,K,M)
 
     ##############################################################################
     #               END OF YOUR CODE                                             #
