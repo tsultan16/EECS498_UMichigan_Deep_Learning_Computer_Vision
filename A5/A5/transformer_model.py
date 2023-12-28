@@ -258,11 +258,7 @@ def scaled_dot_product_no_loop_batch(
     # Replace "pass" statement with your code
     
     # compute unnormalized scaled attn weights: batch matrix multiply matrix of queries with transposed matrix of keys
-    weights_softmax = torch.bmm(query, key.transpose(1,2)) / math.sqrt(M)  # shape: (N,K,K)
-    # apply softmax on the last dimension to normalize
-    weights_softmax = F.softmax(weights_softmax, dim=-1) # shape: (N,K,K)
-    # now batch matrix multiply the attn weights with the value vectors to get the batch of output vectors
-    y = torch.bmm(weights_softmax, value)  # shape: (N,K,M)
+    weights_unnorm = torch.bmm(query, key.transpose(1,2)) / math.sqrt(M)  # shape: (N,K,K)
 
     if mask is not None:
         ##########################################################################
@@ -270,9 +266,17 @@ def scaled_dot_product_no_loop_batch(
         # positions where the mask value is True, otherwise keep it as it is.    #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # fill positions where mask value is True with -1e9
+        weights_unnorm = weights_unnorm.masked_fill(mask, -1e9)
+
     # Replace "pass" statement with your code
-    pass
+    
+    # apply softmax on the last dimension to normalize
+    weights_softmax = F.softmax(weights_unnorm, dim=-1) # shape: (N,K,K)
+    # now batch matrix multiply the attn weights with the value vectors to get the batch of output vectors
+    y = torch.bmm(weights_softmax, value)  # shape: (N,K,M)
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -758,7 +762,7 @@ def get_subsequent_mask(seq):
         seq: a tensor of shape (N, K) where N is the batch sieze and K is the
              length of the sequence
     return:
-        mask: a tensor of shape (N, K, K) where N is the batch sieze and K is the
+        mask: a tensor of shape (N, K, K) where N is the batch size and K is the
               length of the sequence
 
     Given a sequence of length K, we want to mask the weights inside the function
@@ -774,7 +778,13 @@ def get_subsequent_mask(seq):
     #                                                                             #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    N, K = seq.shape
+
+    # create a batch of K x K matrix with ones below diagonal
+    mask = torch.tril(torch.ones(size=(N,K,K)))
+    # create mask in which the positions where there is a zero is True 
+    mask = (mask == 0)
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
