@@ -313,7 +313,19 @@ class SelfAttention(nn.Module):
         # as given above. self.q, self.k, and self.v respectively.               #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # create linear layers for transformation
+        self.q = nn.Linear(dim_in, dim_q)
+        self.k = nn.Linear(dim_in, dim_q)
+        self.v = nn.Linear(dim_in, dim_v)
+
+        # initialize the weights
+        c1 = math.sqrt(6/(dim_in+dim_q))
+        c2 = math.sqrt(6/(dim_in+dim_v))
+        nn.init.uniform_(self.q.weight, a=-c1, b=c1)
+        nn.init.uniform_(self.k.weight, a=-c1, b=c1)
+        nn.init.uniform_(self.v.weight, a=-c2, b=c2)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -348,7 +360,14 @@ class SelfAttention(nn.Module):
         # variable self.weights_softmax                                          #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # transform inputs into query, key and value vectors
+        query = self.q(query)
+        key = self.k(key)
+        value = self.v(value)
+        # compute attention weights and output vectors
+        y, self.weights_softmax = scaled_dot_product_no_loop_batch(query=query, key=key, value=value)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -378,7 +397,7 @@ class MultiHeadAttention(nn.Module):
 
 
 
-        NOTE: Here, when we say dimension, we mean the dimesnion of the embeddings.
+        NOTE: Here, when we say dimension, we mean the dimension of the embeddings.
               In Transformers the input is a tensor of shape (N, K, M), here N is
               the batch size , K is the sequence length and M is the size of the
               input embeddings. As the sequence length(K) and number of batches(N)
@@ -399,7 +418,14 @@ class MultiHeadAttention(nn.Module):
         # SelfAttention.                                                         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.num_heads = num_heads
+        self.heads = nn.ModuleList([SelfAttention(dim_in, dim_out, dim_out) for _ in range(num_heads)])
+        self.output_transform = nn.Linear(dim_out*num_heads, dim_in)
+        # initialize weights of output transform layer
+        c = math.sqrt(6/(dim_out+dim_in))
+        nn.init.uniform_(self.output_transform.weight, a=-c, b=c)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -443,7 +469,19 @@ class MultiHeadAttention(nn.Module):
         # nn.Linear mapping function defined in the initialization step.         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        y = []
+        N, K, M = query.shape
+        # compute output vectors for each head
+        for head in self.heads:
+            y.append(head(query, key, value, mask)) # each y of shape: (N,K,M)
+        # concatenate the outputs    
+        y = torch.cat(y, dim=-1) # shape: (N,K,num_heads*M)
+        # flatten batch and sequence dims and transform using linear layer
+        y = self.output_transform(y.view(N*K,-1)) # shape: (N*K, M)
+        # unflatten batch and sequence dims
+        y = y.view(N,K,M)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
