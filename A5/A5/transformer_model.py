@@ -3,6 +3,7 @@ Implements a Transformer in PyTorch.
 WARNING: you SHOULD NOT use ".to()" or ".cuda()" in each implementation block.
 """
 
+import math
 import torch
 from torch import Tensor, nn, optim
 from torch.nn import functional as F
@@ -126,7 +127,21 @@ def scaled_dot_product_two_loop_single(
     # using weighted sum becomes an output to the Kth query vector                #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    K, M = query.shape
+    out = torch.zeros_like(value)
+    # loop over query vectors
+    for i in range(K):
+        attn_weights = torch.zeros(size=(K,))
+        # loop over key vectors
+        for j in range(K):
+            # compute unnormalized similarity score between the ith query and jth key vectors
+            attn_weights[j] = torch.dot(query[i], key[j]) 
+        # scale then normalize the attention weights by taking softmax
+        attn_weights = F.softmax(attn_weights/math.sqrt(M), dim=0)  # shape : (K,) 
+        # compute ith output vector by taking sum of value vectors weighted by attn weights        
+        out[i] = (attn_weights.view(K,1) * value).sum(dim=0)  # shape : (M,) 
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -143,7 +158,7 @@ def scaled_dot_product_two_loop_batch(
     description in TODO for implementation.
 
     args:
-        query: a Tensor of shape (N,K, M) where N is the batch size, K is the
+        query: a Tensor of shape (N, K, M) where N is the batch size, K is the
             sequence length and  M is the sequence embeding dimension
 
         key: a Tensor of shape (N, K, M) where N is the batch size, K is the
@@ -173,7 +188,20 @@ def scaled_dot_product_two_loop_batch(
     # Hint: look at torch.bmm                                                     #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    out = torch.zeros_like(value)
+    # loop over query vectors
+    for i in range(K):
+        attn_weights = torch.zeros(size=(N,K))
+        # loop over key vectors
+        for j in range(K):
+            # compute unnormalized similarity score between the ith query and jth key vectors for entire batch
+            attn_weights[:,j] = torch.bmm(query[:,i,:].view(N,1,M), key[:,j,:].view(N,M,1)).view(N) 
+        # scale then normalize the attention weights by taking softmax
+        attn_weights = F.softmax(attn_weights/math.sqrt(M), dim=1)   # (N,K)
+        # compute ith output vector by taking sum of value vectors weighted by attn weights        
+        out[:,i,:] = (attn_weights.view(N,K,1) * value).sum(dim=1) # shape: (N,M)
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -228,7 +256,14 @@ def scaled_dot_product_no_loop_batch(
     # Hint: look at torch.bmm and torch.masked_fill                               #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    # compute unnormalized scaled attn weights: batch matrix multiply matrix of queries with transposed matrix of keys
+    weights_softmax = torch.bmm(query, key.transpose(1,2)) / math.sqrt(M)  # shape: (N,K,K)
+    # apply softmax on the last dimension to normalize
+    weights_softmax = F.softmax(weights_softmax, dim=-1) # shape: (N,K,K)
+    # now batch matrix multiply the attn weights with the value vectors to get the batch of output vectors
+    y = torch.bmm(weights_softmax, value)  # shape: (N,K,M)
+
     if mask is not None:
         ##########################################################################
         # TODO: Apply the mask to the weight matrix by assigning -1e9 to the     #
