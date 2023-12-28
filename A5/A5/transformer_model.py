@@ -33,7 +33,9 @@ def generate_token_dict(vocab):
     # elements in between as consequetive number.                                #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    token_dict = {c:i for i,c in enumerate(vocab)}
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -74,7 +76,15 @@ def prepocess_input_sequence(
     # appropriate value for the complete token.
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    split_str = input_str.split()
+    for elem in split_str:
+        if elem in spc_tokens:
+            out.append(token_dict[elem])
+        else:
+            tokenized_digts = [token_dict[digit] for digit in elem]
+            out.extend(tokenized_digts)    
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
