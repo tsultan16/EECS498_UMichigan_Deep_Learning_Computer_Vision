@@ -518,7 +518,11 @@ class LayerNormalization(nn.Module):
         # shift initializations with nn.Parameter                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # initiaize scale (gamma) and shift (beta) parameters
+        self.gamma = nn.Parameter(torch.ones(size=(1,1,emb_dim))) 
+        self.beta = nn.Parameter(torch.zeros(size=(1,1,emb_dim))) 
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -545,7 +549,15 @@ class LayerNormalization(nn.Module):
         # the standard deviation.                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # compute mean and std over the embedding dim
+        mean = torch.mean(x, dim=-1, keepdim=True)  # (N,K,1)
+        std = torch.sqrt(torch.mean((x-mean)**2, dim=-1, keepdim=True)) + self.epsilon    # (N,K,1)
+        # normalize the input
+        x_norm = (x - mean) / std  # (N,K,M)
+        # apply scale and shift
+        y = self.gamma * x_norm + self.beta # (N,K,M)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
