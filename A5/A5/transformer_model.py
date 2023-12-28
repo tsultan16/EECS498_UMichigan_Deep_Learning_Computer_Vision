@@ -384,7 +384,6 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
 
         """
-        
         A naive implementation of the MultiheadAttention layer for Transformer model.
         We use multiple SelfAttention layers parallely on the same input and then concat
         them to into a single tensor. This Tensor is then passed through an MLP to 
@@ -804,10 +803,10 @@ class DecoderBlock(nn.Module):
             )
 
         """
-        The function implements the DecoderBlock for the Transformer model. In the 
+        The function implements the DecoderBlock for the Transformer model. In
         class we learned about encoder only model that can be used for tasks like 
         sequence classification but for more complicated tasks like sequence to 
-        sequence we need a decoder network that can transformt the output of the 
+        sequence we need a decoder network that can transform the output of the 
         encoder to a target sequence. This kind of architecture is important in 
         tasks like language translation where we have a sequence as input and a 
         sequence as output. 
@@ -857,7 +856,6 @@ class DecoderBlock(nn.Module):
         self.norm2 = None
         self.norm3 = None
         self.dropout = None
-        self.feed_forward = None
         ##########################################################################
         # TODO: Initialize the following layers:                                 #
         # 1. Two MultiheadAttention layers with num_heads number of heads, emb_dim
@@ -870,7 +868,15 @@ class DecoderBlock(nn.Module):
         ##########################################################################
 
         # Replace "pass" statement with your code
-        pass
+        
+        self.attention_self = MultiHeadAttention(num_heads, emb_dim, emb_dim//num_heads)
+        self.attention_cross = MultiHeadAttention(num_heads, emb_dim, emb_dim//num_heads)
+        self.norm1 = LayerNormalization(emb_dim) 
+        self.norm2 = LayerNormalization(emb_dim) 
+        self.norm3 = LayerNormalization(emb_dim) 
+        self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.dropout = nn.Dropout(dropout)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -900,7 +906,21 @@ class DecoderBlock(nn.Module):
         # pass. Don't forget to apply the residual connections for different layers.
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # compute masked multihead self-attention to compute decoder output vectors
+        out1 = self.attention_self(dec_inp, dec_inp, dec_inp, mask)  # (N, K, M)
+        # add residual connection and apply layer norm then dropout
+        out2 = self.dropout(self.norm1(dec_inp + out1)) # (N, K, M)       
+        # now apply multihead cross attention using the decoder output vectors as query 
+        # and encoder output vectors as key and value 
+        out3 = self.attention_cross(out2, enc_inp, enc_inp) # (N, K, M)
+        # add residual connection and apply layer norm then dropout
+        out4 = self.dropout(self.norm2(out2 + out3)) # (N, K, M)
+        # pass through feed forward network
+        out5 = self.feed_forward(out4) # (N, K, M)
+        # add residual connection and apply layer norm then dropout
+        y = self.dropout(self.norm3(out4 + out5))
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -973,7 +993,6 @@ class Decoder(nn.Module):
             dropout: float representing the dropout in each DecoderBlock
             vocab_len: length of the vocabulary
 
-
         """
 
         self.layers = nn.ModuleList(
@@ -1014,7 +1033,10 @@ def position_encoding_simple(K: int, M: int) -> Tensor:
     # times to create a tensor of the required output shape                      #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    pos_enc = (torch.arange(end=K)/K).view(K,1)
+    y = pos_enc.expand(K,M).reshape(1,K,M)
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -1037,12 +1059,23 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
     y = None
     ##############################################################################
     # TODO: Given the length of input sequence K and embedding dimension M       #
-    # construct a tesnor of shape (K, M) where the value along the dimensions    #
+    # construct a tensor of shape (K, M) where the value along the dimensions    #
     # follow the equations given in the notebook. Make sure to keep in mind the  #
     # alternating sines and cosines along the embedding dimension M.             #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    y = torch.arange(end=K).view(K,1) # (K,1)
+    y = y.expand(K,M) # (K,M)
+    #a = 2*(torch.arange(0,M)//2) / M # (M,)
+    a = 2*(torch.arange(0,M)//2) // M # (M,)
+    a = torch.pow(10000,a) # (M,)
+    a = a.view(1,M)
+    y = y / a
+    y[:,::2] = torch.sin(y[:,::2])
+    y[:,1::2] = torch.cos(y[:,1::2])
+
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -1092,7 +1125,9 @@ class Transformer(nn.Module):
         # name of this layer as self.emb_layer                                   #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.emb_layer = nn.Embedding(vocab_len, emb_dim)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -1146,7 +1181,11 @@ class Transformer(nn.Module):
         # Hint: the mask shape will depend on the Tensor ans_b
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        enc_out = self.encoder(q_emb_inp)
+        mask = get_subsequent_mask(ans_b[:,:-1])
+        dec_out = self.decoder(a_emb_inp, enc_out, mask)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
