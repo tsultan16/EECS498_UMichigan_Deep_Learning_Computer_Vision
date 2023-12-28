@@ -595,7 +595,14 @@ class FeedForwardBlock(nn.Module):
         # change?                                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.linear_1 = nn.Linear(inp_dim, hidden_dim_feedforward)
+        self.relu = nn.ReLU()
+        self.linear_2 = nn.Linear(hidden_dim_feedforward, inp_dim)
+        c = math.sqrt(6/(inp_dim+hidden_dim_feedforward))
+        nn.init.uniform_(self.linear_1.weight, a=-c, b=c)
+        nn.init.uniform_(self.linear_2.weight, a=-c, b=c)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -617,7 +624,9 @@ class FeedForwardBlock(nn.Module):
         # no activation after the second MLP                                      #
         ###########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        y = self.linear_2(self.relu(self.linear_1(x)))
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -692,7 +701,13 @@ class EncoderBlock(nn.Module):
         # 4. A Dropout layer with given dropout parameter                        #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        self.multihead_attn = MultiHeadAttention(num_heads, emb_dim, emb_dim//num_heads)
+        self.ln_1 = LayerNormalization(emb_dim) 
+        self.ln_2 = LayerNormalization(emb_dim) 
+        self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.dropout = nn.Dropout(dropout)
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -717,7 +732,16 @@ class EncoderBlock(nn.Module):
         # reference from the architecture written in the fucntion documentation. #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        # compute multihead attention output vectors
+        out1 = self.multihead_attn(x, x, x) # (N, K, M)
+        # add residual connection and apply layer norm then dropout
+        out2 = self.dropout(self.ln_1(x + out1))
+        # pass through feed forward network
+        out3 = self.feed_forward(out2)
+        # add residual connection and apply layer norm then dropout
+        y = self.dropout(self.ln_2(out2 + out3))
+
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
