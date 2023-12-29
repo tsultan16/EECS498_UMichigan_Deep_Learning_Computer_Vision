@@ -172,10 +172,9 @@ def train(
             inp, out = it
             out = out.to(device)
             inp = inp.to(device)
-            gnd = out[:, 1:].contiguous().view(-1).long()
+            gnd = out[:, 1:].contiguous().view(-1)
             optimizer.zero_grad()
-
-            pred = model(inp.long(), out.long())
+            pred = model(inp, out)
             loss = loss_func(pred, gnd)
             epoch_loss.append(loss.item())  
             pred_max = pred.max(1)[1]
@@ -227,8 +226,8 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
         inp, out = it
         out = out.to(device)
         inp = inp.to(device)
-        gnd = out[:, 1:].contiguous().view(-1).long()
-        pred = model(inp.long(), out.long())
+        gnd = out[:, 1:].contiguous().view(-1)
+        pred = model(inp, out)
         loss = loss_func(pred, gnd)
         pred_max = pred.max(1)[1]
         n_correct = pred_max.eq(gnd)
@@ -244,7 +243,7 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
 def inference(model, inp_exp, out_seq_len,device=torch.device("cpu")):
     model.eval()
     # initialize target with just the BOS token (idx=14)
-    y_init = torch.tensor([[14]], dtype=torch.long, device=device).unsqueeze(0).view(1, 1)
+    y_init = torch.tensor([[14]], dtype=torch.int64, device=device).unsqueeze(0).view(1, 1)
 
     ques_emb = model.emb_layer(inp_exp)
     ques_pos = model.pos_emb_layer(torch.arange(inp_exp.shape[1], device=device))

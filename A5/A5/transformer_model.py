@@ -1263,8 +1263,8 @@ class AddSubDataset(torch.utils.data.Dataset):
 
         inp = self.input_seqs[idx]
         out = self.target_seqs[idx]
-        preprocess_inp = torch.tensor(self.preprocess(inp))
-        preprocess_out = torch.tensor(self.preprocess(out))
+        preprocess_inp = torch.tensor(self.preprocess(inp), dtype=torch.int64)
+        preprocess_out = torch.tensor(self.preprocess(out), dtype=torch.int64)
 
         return preprocess_inp,preprocess_out
 
