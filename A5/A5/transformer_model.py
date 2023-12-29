@@ -1153,8 +1153,8 @@ class Transformer(nn.Module):
         )
 
     def forward(
-        self, ques_b: Tensor, ques_pos: Tensor, ans_b: Tensor, ans_pos: Tensor
-    ) -> Tensor:
+        self, ques_b: Tensor, ans_b: Tensor
+        ) -> Tensor:
 
         """
 
@@ -1184,8 +1184,8 @@ class Transformer(nn.Module):
         a_pos = self.pos_emb_layer(torch.arange(ans_b.shape[1]-1, device=ques_b.device))  # (K,M)
 
         # add positional embeddings with token embeddings
-        q_emb_inp = q_emb + q_pos #+ ques_pos
-        a_emb_inp = a_emb[:, :-1] + a_pos  #+ ans_pos[:, :-1]
+        q_emb_inp = q_emb + q_pos 
+        a_emb_inp = a_emb[:, :-1] + a_pos  
 
         dec_out = None
         ##########################################################################
@@ -1200,7 +1200,6 @@ class Transformer(nn.Module):
         ##########################################################################
         # Replace "pass" statement with your code
         
-        M = ques_pos.shape[-1]
         enc_out = self.encoder(q_emb_inp)
         mask = get_subsequent_mask(ans_b[:,:-1])
         dec_out = self.decoder(a_emb_inp, enc_out, mask)
@@ -1221,9 +1220,8 @@ class AddSubDataset(torch.utils.data.Dataset):
         target_seqs,
         convert_str_to_tokens,
         special_tokens,
-        emb_dim,
-        pos_encode,
-    ):
+        emb_dim    
+        ):
 
         """
         The class implements the dataloader that will be used for the toy dataset.
@@ -1234,7 +1232,6 @@ class AddSubDataset(torch.utils.data.Dataset):
             convert_str_to_tokens: Dictionary to convert input string to tokens
             special_tokens: A list of strings
             emb_dim: embedding dimension of the transformer
-            pos_encode: A function to compute positional encoding for the data
         """
 
         self.input_seqs = input_seqs
@@ -1242,7 +1239,6 @@ class AddSubDataset(torch.utils.data.Dataset):
         self.convert_str_to_tokens = convert_str_to_tokens
         self.emb_dim = emb_dim
         self.special_tokens = special_tokens
-        self.pos_encode = pos_encode
 
     def preprocess(self, inp):
         return prepocess_input_sequence(
@@ -1269,12 +1265,8 @@ class AddSubDataset(torch.utils.data.Dataset):
         out = self.target_seqs[idx]
         preprocess_inp = torch.tensor(self.preprocess(inp))
         preprocess_out = torch.tensor(self.preprocess(out))
-        inp_pos = len(preprocess_inp)
-        inp_pos_enc = self.pos_encode(inp_pos, self.emb_dim)
-        out_pos = len(preprocess_out)
-        out_pos_enc = self.pos_encode(out_pos, self.emb_dim)
 
-        return preprocess_inp, inp_pos_enc[0], preprocess_out, out_pos_enc[0]
+        return preprocess_inp,preprocess_out
 
     def __len__(self):
         return len(self.input_seqs)
