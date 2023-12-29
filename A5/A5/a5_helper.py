@@ -160,6 +160,7 @@ def train(
     warmup_interval=1000,
     lr=6e-4,
     device=torch.device("cpu"),
+    log_metrics=None
 ):
     print("Training started...")
     
@@ -213,6 +214,9 @@ def train(
             f"{val_acc:.4f}",
             "]",
         )
+        if log_metrics:
+            metrics = {"train_loss" : loss_hist, "train_accuracy" : train_acc, "val_loss": val_loss, "val_accuracy": val_acc}
+            log_metrics(metrics)
 
     return iteration
 
@@ -227,8 +231,9 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
         out = out.to(device)
         inp = inp.to(device)
         gnd = out[:, 1:].contiguous().view(-1)
-        pred = model(inp, out)
-        loss = loss_func(pred, gnd)
+        with torch.no_grad():
+            pred = model(inp, out)
+            loss = loss_func(pred, gnd)
         pred_max = pred.max(1)[1]
         n_correct = pred_max.eq(gnd)
         n_correct = n_correct.sum().item()
@@ -245,23 +250,25 @@ def inference(model, inp_exp, out_seq_len,device=torch.device("cpu")):
     # initialize target with just the BOS token (idx=14)
     y_init = torch.tensor([[14]], dtype=torch.int64, device=device).unsqueeze(0).view(1, 1)
 
+    inp_exp = inp_exp.to(device)
     ques_emb = model.emb_layer(inp_exp)
     ques_pos = model.pos_emb_layer(torch.arange(inp_exp.shape[1], device=device))
     out_pos = model.pos_emb_layer(torch.arange(out_seq_len, device=device))
     q_emb_inp = ques_emb + ques_pos
 
-    # encode the input sequence
-    enc_out = model.encoder(q_emb_inp)
-    # generate target sequence, one token at a time
-    for i in range(out_seq_len - 1):
-        ans_emb = model.emb_layer(y_init)
-        a_emb_inp = ans_emb + out_pos[None,: y_init.shape[1], :]
-        dec_out = model.decoder(a_emb_inp, enc_out, None)
-        _, next_word = torch.max(
-            dec_out[0, y_init.shape[1] - 1 : y_init.shape[1]], dim=1
-        )
+    with torch.no_grad():
+        # encode the input sequence
+        enc_out = model.encoder(q_emb_inp)
+        # generate target sequence, one token at a time
+        for i in range(out_seq_len - 1):
+            ans_emb = model.emb_layer(y_init)
+            a_emb_inp = ans_emb + out_pos[None,: y_init.shape[1], :]
+            dec_out = model.decoder(a_emb_inp, enc_out, None)
+            _, next_word = torch.max(
+                dec_out[0, y_init.shape[1] - 1 : y_init.shape[1]], dim=1
+            )
 
-        y_init = torch.cat([y_init, next_word.view(1, 1)], dim=1)
+            y_init = torch.cat([y_init, next_word.view(1, 1)], dim=1)
     return y_init, model
 
 
