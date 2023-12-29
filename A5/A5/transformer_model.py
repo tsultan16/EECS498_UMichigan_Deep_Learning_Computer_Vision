@@ -705,7 +705,7 @@ class EncoderBlock(nn.Module):
         ##########################################################################
         # Replace "pass" statement with your code
         
-        self.multihead_attn = MultiHeadAttention(num_heads, emb_dim, emb_dim//num_heads)
+        self.MultiHeadBlock = MultiHeadAttention(num_heads, emb_dim, emb_dim//num_heads)
         self.ln_1 = LayerNormalization(emb_dim) 
         self.ln_2 = LayerNormalization(emb_dim) 
         self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
@@ -737,7 +737,7 @@ class EncoderBlock(nn.Module):
         # Replace "pass" statement with your code
         
         # compute multihead attention output vectors
-        out1 = self.multihead_attn(x, x, x) # (N, K, M)
+        out1 = self.MultiHeadBlock(x, x, x) # (N, K, M)
         # add residual connection and apply layer norm then dropout
         out2 = self.dropout(self.ln_1(x + out1))
         # pass through feed forward network
@@ -745,10 +745,6 @@ class EncoderBlock(nn.Module):
         # add residual connection and apply layer norm then dropout
         y = self.dropout(self.ln_2(out2 + out3))
 
-        """x = self.ln_1(x)
-        x = x + self.dropout(self.multihead_attn(x, x, x))
-        y = x + self.dropout(self.feed_forward(self.ln_2(x)))
-        """
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -784,7 +780,7 @@ def get_subsequent_mask(seq):
     N, K = seq.shape
 
     # create a batch of K x K matrix with ones on and below diagonal
-    mask = torch.tril(torch.ones(size=(N,K,K)))
+    mask = torch.tril(torch.ones(size=(N,K,K), device=seq.device))
     # create mask in which the positions where there is a zero is True 
     mask = (mask == 0)
 
@@ -916,18 +912,15 @@ class DecoderBlock(nn.Module):
         # compute masked multihead self-attention to compute decoder output vectors
         out1 = self.attention_self(dec_inp, dec_inp, dec_inp, mask)  # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        #out2 = self.dropout(self.norm1(dec_inp + out1)) # (N, K, M)       
         out2 = self.norm1(dec_inp + self.dropout1(out1)) # (N, K, M)       
         # now apply multihead cross attention using the decoder output vectors as query 
         # and encoder output vectors as key and value 
         out3 = self.attention_cross(out2, enc_inp, enc_inp) # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        #out4 = self.dropout(self.norm2(out2 + out3)) # (N, K, M)
         out4 = self.norm2(out2 + self.dropout2(out3)) # (N, K, M)
         # pass through feed forward network
         out5 = self.feed_forward(out4) # (N, K, M)
         # add residual connection and apply layer norm then dropout
-        #y = self.dropout(self.norm3(out4 + out5))
         y = self.norm3(out4 + self.dropout3(out5))
 
         ##########################################################################
@@ -1019,6 +1012,7 @@ class Decoder(nn.Module):
         out = target_seq.clone()
         for _layer in self.layers:
             out = _layer(out, enc_out, mask)
+
         out = self.proj_to_vocab(out)
         return out
 
@@ -1095,6 +1089,7 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
 class Transformer(nn.Module):
     def __init__(
         self,
+        block_size: int,
         num_heads: int,
         emb_dim: int,
         feedforward_dim: int,
@@ -1117,6 +1112,7 @@ class Transformer(nn.Module):
         inputs(look at the code for detials) are then sent through the encoder and  
         decoder blocks  to get the  final output.
         args:
+            block_size: max(len(input_sequences), len(target_sequences))
             num_heads: int representing number of heads to be used in Encoder
                        and decoder
             emb_dim: int representing embedding dimension of the Transformer
@@ -1136,7 +1132,10 @@ class Transformer(nn.Module):
         ##########################################################################
         # Replace "pass" statement with your code
         
-        self.emb_layer = nn.Embedding(vocab_len, emb_dim)
+        self.emb_layer = nn.Embedding(vocab_len, emb_dim) 
+
+        # also create a layer for learned position embeddings
+        self.pos_emb_layer = nn.Embedding(block_size, emb_dim)
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
@@ -1172,13 +1171,22 @@ class Transformer(nn.Module):
                 encodings of the target sequence
 
         returns:
-            dec_out: Tensor of shape (N*O, M) where O is the size of
+            dec_out: Tensor of shape (N*O, V) where O is the size of
                 the target sequence.
         """
+
+        # compute token embeddings
         q_emb = self.emb_layer(ques_b)
         a_emb = self.emb_layer(ans_b)
-        q_emb_inp = q_emb + ques_pos
-        a_emb_inp = a_emb[:, :-1] + ans_pos[:, :-1]
+
+        # compute positional embeddings
+        q_pos = self.pos_emb_layer(torch.arange(ques_b.shape[1], device=ques_b.device)) # (K,M)
+        a_pos = self.pos_emb_layer(torch.arange(ans_b.shape[1]-1, device=ques_b.device))  # (K,M)
+
+        # add positional embeddings with token embeddings
+        q_emb_inp = q_emb + q_pos #+ ques_pos
+        a_emb_inp = a_emb[:, :-1] + a_pos  #+ ans_pos[:, :-1]
+
         dec_out = None
         ##########################################################################
         # TODO: This portion consists of writing the forward part for the complete
@@ -1196,8 +1204,8 @@ class Transformer(nn.Module):
         enc_out = self.encoder(q_emb_inp)
         mask = get_subsequent_mask(ans_b[:,:-1])
         dec_out = self.decoder(a_emb_inp, enc_out, mask)
-        N, O, M = dec_out.shape
-        dec_out = dec_out.view(N*O,M)
+        N, O, V = dec_out.shape
+        dec_out = dec_out.view(N*O,V)
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
