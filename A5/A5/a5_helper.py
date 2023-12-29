@@ -150,7 +150,7 @@ def decode_captions(captions, idx_to_word):
 
 
 def train(
-    model,
+    model, optimizer, iteration,
     train_dataloader,
     val_dataloader,
     loss_func,
@@ -162,18 +162,12 @@ def train(
     device=torch.device("cpu"),
 ):
     print("Training started...")
-    if warmup_interval is None:
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=lr, betas=(0.9, 0.995), eps=1e-9
-        )
-    else:
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=warmup_lr, betas=(0.9, 0.995), eps=1e-9
-        )
-    iteration = 0
+    
     for epoch_num in range(num_epochs):
         epoch_loss = []
         model.train()
+        num_correct = 0
+        total = 0
         for it in train_dataloader:
             inp, inp_pos, out, out_pos = it
             model = model.to(device)
@@ -186,7 +180,13 @@ def train(
 
             pred = model(inp.long(), inp_pos, out.long(), out_pos)
             loss = loss_func(pred, gnd)
-            epoch_loss.append(loss.item())
+            epoch_loss.append(loss.item())  
+            pred_max = pred.max(1)[1]
+            n_correct = pred_max.eq(gnd)
+            n_correct = n_correct.sum().item()
+            num_correct = num_correct + n_correct        
+            total = total + len(pred_max)
+            
             if warmup_interval is not None and iteration == warmup_interval:
                 print(
                     f"End of warmup. Swapping learning rates from {warmup_lr} to {lr}"
@@ -199,19 +199,26 @@ def train(
             optimizer.step()
             iteration = iteration + 1
         avg_epoch_loss = sum(epoch_loss) / len(epoch_loss)
+        train_acc = num_correct / total
         val_loss, val_acc = val(model, val_dataloader, loss_func, batch_size)
-        loss_hist = avg_epoch_loss / (batch_size * 4)
+        #loss_hist = avg_epoch_loss / (batch_size * 4)
         print(
             f"[epoch: {epoch_num+1}]",
             "[loss: ",
-            f"{loss_hist:.4f}",
+            f"{avg_epoch_loss:.4f}",
+            "]",
+            "[acc: ",
+            f"{train_acc:.4f}",
             "]",
             "val_loss: [val_loss ",
             f"{val_loss:.4f}",
             "]",
+            "val_acc: [val_acc ",
+            f"{val_acc:.4f}",
+            "]",
         )
 
-    return model
+    return iteration
 
 
 def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
@@ -234,15 +241,16 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
         pred_max = pred.max(1)[1]
         gnd = gnd.contiguous().view(-1)
 
+        #print(f"pred :{pred_max[:200]}, gt: {gnd[:200]}")
+
         n_correct = pred_max.eq(gnd)
         n_correct = n_correct.sum().item()
         num_correct = num_correct + n_correct
-
         total = total + len(pred_max)
         epoch_loss.append(loss.item())
 
     avg_epoch_loss = sum(epoch_loss) / len(epoch_loss)
-    return avg_epoch_loss / (batch_size * 4), n_correct / total
+    return avg_epoch_loss / (batch_size * 4), num_correct / total
 
 
 def inference(model, inp_exp, inp_exp_pos, out_pos_exp, out_seq_len):
