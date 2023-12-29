@@ -169,16 +169,13 @@ def train(
         num_correct = 0
         total = 0
         for it in train_dataloader:
-            inp, inp_pos, out, out_pos = it
-            model = model.to(device)
-            inp_pos = inp_pos.to(device)
-            out_pos = out_pos.to(device)
+            inp, out = it
             out = out.to(device)
             inp = inp.to(device)
             gnd = out[:, 1:].contiguous().view(-1).long()
             optimizer.zero_grad()
 
-            pred = model(inp.long(), inp_pos, out.long(), out_pos)
+            pred = model(inp.long(), out.long())
             loss = loss_func(pred, gnd)
             epoch_loss.append(loss.item())  
             pred_max = pred.max(1)[1]
@@ -200,12 +197,12 @@ def train(
             iteration = iteration + 1
         avg_epoch_loss = sum(epoch_loss) / len(epoch_loss)
         train_acc = num_correct / total
-        val_loss, val_acc = val(model, val_dataloader, loss_func, batch_size)
-        #loss_hist = avg_epoch_loss / (batch_size * 4)
+        val_loss, val_acc = val(model, val_dataloader, loss_func, batch_size, device)
+        loss_hist = avg_epoch_loss / (batch_size * 4)
         print(
             f"[epoch: {epoch_num+1}]",
             "[loss: ",
-            f"{avg_epoch_loss:.4f}",
+            f"{loss_hist:.4f}",
             "]",
             "[acc: ",
             f"{train_acc:.4f}",
@@ -227,21 +224,14 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
     num_correct = 0
     total = 0
     for it in dataloader:
-        inp, inp_pos, out, out_pos = it
-
-        model = model.to(device)
-        inp_pos = inp_pos.to(device)
-        out_pos = out_pos.to(device)
+        inp, out = it
         out = out.to(device)
         inp = inp.to(device)
         gnd = out[:, 1:].contiguous().view(-1).long()
-        pred = model(inp.long(), inp_pos, out.long(), out_pos)
+        pred = model(inp.long(), out.long())
         loss = loss_func(pred, gnd)
-
         pred_max = pred.max(1)[1]
         gnd = gnd.contiguous().view(-1)
-
-        #print(f"pred :{pred_max[:200]}, gt: {gnd[:200]}")
 
         n_correct = pred_max.eq(gnd)
         n_correct = n_correct.sum().item()
@@ -253,16 +243,18 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
     return avg_epoch_loss / (batch_size * 4), num_correct / total
 
 
-def inference(model, inp_exp, inp_exp_pos, out_pos_exp, out_seq_len):
+def inference(model, inp_exp, out_seq_len):
     model.eval()
     y_init = torch.LongTensor([14]).unsqueeze(0).cuda().view(1, 1)
 
     ques_emb = model.emb_layer(inp_exp)
-    q_emb_inp = ques_emb + inp_exp_pos
+    ques_pos = model.pos_emb_layer(torch.arange(ques_emb.shape[1], device=y_init.device))
+    out_pos = model.pos_emb_layer(torch.arange(out_seq_len, device=y_init.device))
+    q_emb_inp = ques_emb + ques_pos
     enc_out = model.encoder(q_emb_inp)
     for i in range(out_seq_len - 1):
         ans_emb = model.emb_layer(y_init)
-        a_emb_inp = ans_emb + out_pos_exp[:, : y_init.shape[1], :]
+        a_emb_inp = ans_emb + out_pos[None,: y_init.shape[1], :]
         dec_out = model.decoder(a_emb_inp, enc_out, None)
         _, next_word = torch.max(
             dec_out[0, y_init.shape[1] - 1 : y_init.shape[1]], dim=1
