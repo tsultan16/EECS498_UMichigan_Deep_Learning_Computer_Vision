@@ -41,7 +41,18 @@ def compute_saliency_maps(X, y, model):
     # Hint: X.grad.data stores the gradients                                     #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+
+    # forward pass through model to compute class scores
+    class_scores = model(X)
+    loss = torch.nn.functional.cross_entropy(class_scores, y, reduction='sum')
+    # backward pass
+    loss.backward()
+    # get loss gradient w.r.t. input image pixels
+    x_grad = X.grad.data # shape: (N,3,H,W)
+    # get saliency map
+    saliency, _ = torch.abs(x_grad).max(dim=1)
+
+
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
