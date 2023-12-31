@@ -153,7 +153,22 @@ def class_visualization_step(img, target_y, model, **kwargs):
     # after each step.                                                     #
     ########################################################################
     # Replace "pass" statement with your code
-    pass
+    
+    model.zero_grad() # reset the model parameter gradients
+
+    # forward pass to compute class scores
+    class_scores = model(img)
+    # get the score for target class
+    sy = class_scores[0,target_y]
+    # compute loss
+    loss = sy - l2_reg * torch.sum(img**2)
+    # perform backward pass
+    loss.backward()
+    # gradient ascent step on image
+    img.data += learning_rate * img.grad.data
+    # reset image gradient
+    img.grad.zero_()      
+
     ########################################################################
     #                             END OF YOUR CODE                         #
     ########################################################################
