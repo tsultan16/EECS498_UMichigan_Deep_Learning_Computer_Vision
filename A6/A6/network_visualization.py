@@ -95,7 +95,30 @@ def make_adversarial_attack(X, target_y, model, max_iter=100, verbose=True):
     # You can print your progress over iterations to check your algorithm.       #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+
+    # training loop
+    for i in range(max_iter):
+        X_adv.detach().requires_grad_()  # use detach to start a new computation graph on every iteration
+
+        # predict class scores for adverserial image
+        class_scores = model(X_adv)
+        _, pred_class = torch.max(class_scores, dim=1)
+        # get the score for target class
+        target_score = class_scores[0,target_y]
+        # backward pass to get the gradient of this score
+        model.zero_grad()
+        target_score.backward()
+        # now preform gradient ascent step on adverserial image
+        with torch.no_grad():
+            g = X_adv.grad.data
+            X_adv += learning_rate * g / torch.linalg.norm(g)
+
+        if verbose:
+            print(f"Iteration# {i}, target score: {target_score.item():.3f}, target class: {target_y}, predicted_class: {pred_class.item()}")
+
+        if pred_class.item() == target_y:
+            break
+
     ##############################################################################
     #                             END OF YOUR CODE                               #
     ##############################################################################
